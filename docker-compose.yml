@@ -1,0 +1,42 @@
+# Local Redis for development.
+#
+# Both services talk to Upstash over its HTTP REST API, not the Redis wire
+# protocol. `serverless-redis-http` speaks that REST API in front of a plain
+# Redis, so you can develop without an Upstash account and without changing a
+# line of application code.
+#
+#   docker compose up -d
+#
+# Then point both .env files at:
+#   UPSTASH_REDIS_REST_URL=http://localhost:8079
+#   UPSTASH_REDIS_REST_TOKEN=local_dev_token
+#
+# Data lives in a named volume and survives restarts. To wipe it:
+#   docker compose down -v
+
+services:
+  redis:
+    image: redis:7-alpine
+    command: redis-server --save 60 1 --appendonly no
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis-http:
+    image: hiett/serverless-redis-http:latest
+    ports:
+      - "8079:80"
+    environment:
+      SRH_MODE: env
+      SRH_TOKEN: local_dev_token
+      SRH_CONNECTION_STRING: redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  redis-data:
