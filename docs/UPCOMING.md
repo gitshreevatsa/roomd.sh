@@ -1,6 +1,6 @@
 # roomd roadmap
 
-Current version: **v0.5.0**. Deployed: Railway (`api.roomd.sh`) + Vercel
+Current version: **v0.6.0**. Deployed: Railway (`api.roomd.sh`) + Vercel
 (`roomd.sh` / `app.roomd.sh`). Shared Upstash Redis.
 
 This file tracks what is left. Everything listed as built has a test covering it
@@ -55,16 +55,20 @@ in `tests/`. Run `bun test` before trusting this document.
 
 ---
 
-## Not built
+## Shipped (continued)
 
 ### v0.6: ops + history
-| Item | Why |
+| Item | Where |
 |---|---|
-| Structured logging (JSON to stdout) | Searchable logs |
-| Context versioning history + `get_context_history` | Append-only history of updates |
-| `get_room_info` | Room metadata: created, owner, member count |
-| Auto-generated roomId | roomd-web does this today; the server does not |
-| GDPR self-service account deletion + data doc | Right to erasure |
+| Structured JSON logging | `src/log.ts` |
+| Context history + `get_context_history` | `pushContextHistory`, context tools |
+| `get_room_info` + room meta | `tools/info.ts` |
+| Auto `POST /admin/rooms` | `src/index.ts` |
+| GDPR self-delete + DATA.md | roomd-web `/api/account`, `docs/DATA.md` |
+
+---
+
+## Not built (continued)
 
 ### v1.0: scale
 | Item | Why |

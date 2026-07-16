@@ -11,6 +11,20 @@ Both packages share a version number.
 
 ---
 
+## [0.6.0] - 2026-07-16
+
+Ops, history, and compliance for a production deployment.
+
+### Added
+
+- **Structured JSON logging.** `src/log.ts` — one object per line on stdout/stderr.
+- **`get_context_history`.** Prior snapshots on `update_context` (capped list).
+- **`get_room_info`.** Owner, createdAt, member/task/context/event counts.
+- **Auto room create.** `POST /admin/rooms` with optional `roomId` (nanoid if omitted).
+- **DATA.md.** What PII lives where; self-service erasure path documented.
+
+---
+
 ## [0.5.0] - 2026-07-16
 
 Agent quality-of-life tools for managing rooms, plans, and peer reviews.
