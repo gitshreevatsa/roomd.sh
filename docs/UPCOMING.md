@@ -81,9 +81,11 @@ in `tests/`. Run `bun test` before trusting this document.
 
 ## Deployment
 
-The server deploys to **Railway** as a container (`Dockerfile` + `railway.json`),
-and the dashboard (`roomd-web`) deploys to **Vercel**. Both share one Upstash
-Redis. Full steps in [`../../docs/DEPLOY.md`](../../docs/DEPLOY.md).
+The server deploys as a container (`Dockerfile` + optional `railway.json`) on
+**Fly.io, Render, or Railway**, and the dashboard (`roomd-web`) deploys to
+**Vercel**. Staging uses `roomd.dev`; production uses `roomd.sh`. Full local /
+stage / prod env matrices, DNS, and go-live checklist:
+[`../../docs/DEPLOY.md`](../../docs/DEPLOY.md).
 
 What the server needs is small: one long-lived process, the env vars in
 `.env.example`, and outbound HTTPS to Upstash. It is stateless, so any number of

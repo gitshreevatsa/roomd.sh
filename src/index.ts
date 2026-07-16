@@ -266,13 +266,15 @@ app.get("/admin/keys", requireAuth, requireTeamKey, async (c) => {
 
 /**
  * DELETE /admin/keys/:keyId
- * Revoke a dynamic key by its keyId. Only your team's keys can be revoked.
+ * Revoke a dynamic key. Teams may revoke their own; static operator keys may
+ * revoke any org key (dashboard owner pulling access).
  */
 app.delete("/admin/keys/:keyId", requireAuth, requireTeamKey, async (c) => {
   const keyCtx = c.get("keyCtx") as KeyContext;
   const keyId = c.req.param("keyId");
   try {
-    const ok = await revokeDynamicKey(keyId, keyCtx.teamId);
+    // Static operator keys may revoke any org key; teams may only revoke their own.
+    const ok = await revokeDynamicKey(keyId, keyCtx.teamId, keyCtx.isStatic);
     if (!ok) return c.json({ error: "Key not found or not owned by your team" }, 404);
     return c.json({ ok: true, keyId });
   } catch (err) {

@@ -615,14 +615,23 @@ export async function listDynamicKeys(
   }
 }
 
-/** Revoke a dynamic key. Only the owning team may revoke it. False if not found or not theirs. */
-export async function revokeDynamicKey(keyId: string, requestingTeamId: string): Promise<boolean> {
+/**
+ * Revoke a dynamic key.
+ * Owning team may revoke its own keys. When `asOperator` is true (static env
+ * key), any key may be revoked — used by the dashboard owner to pull access.
+ */
+export async function revokeDynamicKey(
+  keyId: string,
+  requestingTeamId: string,
+  asOperator = false,
+): Promise<boolean> {
   try {
     const raw = await redis.get<StoredDynKey>(keys.dynKeyById(keyId));
-    if (!raw || raw.teamId !== requestingTeamId) return false;
+    if (!raw) return false;
+    if (!asOperator && raw.teamId !== requestingTeamId) return false;
     await redis.del(keys.dynKey(raw.secretHash));
     await redis.del(keys.dynKeyById(keyId));
-    await redis.srem(keys.dynKeysByTeam(requestingTeamId), keyId);
+    await redis.srem(keys.dynKeysByTeam(raw.teamId), keyId);
     return true;
   } catch (err) {
     process.stderr.write(`[redis] revokeDynamicKey error: ${String(err)}\n`);
