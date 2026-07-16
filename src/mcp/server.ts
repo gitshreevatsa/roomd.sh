@@ -66,6 +66,12 @@ import {
   listSharedVarsInput,
   listSharedVarsTool,
 } from "./tools/vars.js";
+import {
+  listRoomsInput,
+  listRooms,
+  leaveRoomInput,
+  leaveRoom,
+} from "./tools/rooms.js";
 
 /**
  * Every tool takes a roomId. Constraining the shape this way means a tool that
@@ -118,11 +124,45 @@ function registerRoomTool<Shape extends RoomShape>(
   );
 }
 
+/** Team-scoped tool (no room ownership check; handler receives keyCtx). */
+function registerTeamTool<Shape extends z.ZodRawShape>(
+  server: McpServer,
+  keyCtx: KeyContext,
+  name: string,
+  description: string,
+  schema: z.ZodObject<Shape>,
+  handler: (
+    input: z.infer<z.ZodObject<Shape>>,
+    keyCtx: KeyContext,
+  ) => Promise<unknown>,
+): void {
+  const callback = async (input: unknown): Promise<CallToolResult> => {
+    try {
+      const parsed = schema.parse(input);
+      const result = await handler(parsed, keyCtx);
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text", text: `Error: ${message}` }],
+        isError: true,
+      };
+    }
+  };
+  server.registerTool(
+    name,
+    { description, inputSchema: schema.shape },
+    callback as ToolCallback<Shape>,
+  );
+}
+
 /** Creates and returns a configured McpServer with all roomd tools registered. */
 export function createMcpServer(keyCtx: KeyContext): McpServer {
   const server = new McpServer({
     name: "roomd",
-    version: "0.3.0",
+    version: "0.4.0",
   });
 
   const tool = <Shape extends RoomShape>(
@@ -329,6 +369,26 @@ export function createMcpServer(keyCtx: KeyContext): McpServer {
     "Read every shared variable in the room.",
     listSharedVarsInput,
     listSharedVarsTool,
+  );
+
+  // -------------------------------------------------------------------------
+  // Rooms
+  // -------------------------------------------------------------------------
+
+  registerTeamTool(
+    server,
+    keyCtx,
+    "list_rooms",
+    "List room ids owned by your team (or the single room an invite token may access).",
+    listRoomsInput,
+    listRooms,
+  );
+
+  tool(
+    "leave_room",
+    "Leave a room immediately: drop your presence and notify other agents.",
+    leaveRoomInput,
+    leaveRoom,
   );
 
   return server;

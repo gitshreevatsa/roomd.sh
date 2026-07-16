@@ -238,6 +238,32 @@ export async function registerAgent(
   }
 }
 
+/** Remove an agent from the room's agent SET (leave_room). */
+export async function unregisterAgent(
+  roomId: string,
+  agentId: string,
+): Promise<void> {
+  try {
+    await redis.srem(keys.agents(roomId), agentId);
+  } catch (err) {
+    process.stderr.write(`[redis] unregisterAgent error: ${String(err)}\n`);
+    throw err;
+  }
+}
+
+/** Drop the heartbeat key so the agent is immediately offline. */
+export async function clearHeartbeat(
+  roomId: string,
+  agentId: string,
+): Promise<void> {
+  try {
+    await redis.del(keys.heartbeat(roomId, agentId));
+  } catch (err) {
+    process.stderr.write(`[redis] clearHeartbeat error: ${String(err)}\n`);
+    throw err;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Shared variable helpers (small facts agents agree on, stored as a HASH)
 // ---------------------------------------------------------------------------
