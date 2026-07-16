@@ -41,6 +41,8 @@ import {
   getContextHistoryTool,
 } from "./tools/context.js";
 import { getRoomInfoInput, getRoomInfo } from "./tools/info.js";
+import { searchInput, search } from "./tools/search.js";
+import { waitForEventsInput, waitForEvents } from "./tools/wait.js";
 import {
   postEventInput,
   postEvent,
@@ -320,6 +322,20 @@ export function createMcpServer(keyCtx: KeyContext): McpServer {
     "Room metadata: owner team, created time, member/task/context/event counts.",
     getRoomInfoInput,
     getRoomInfo,
+  );
+
+  tool(
+    "search",
+    "Full-text search across tasks, context, and recent events in the room. Set semantic:true only when Upstash Vector is configured.",
+    searchInput,
+    search,
+  );
+
+  tool(
+    "wait_for_events",
+    "Block briefly (up to timeoutMs) until unread events arrive for your agent. MCP-friendly alternative to SSE.",
+    waitForEventsInput,
+    waitForEvents,
   );
 
   // -------------------------------------------------------------------------

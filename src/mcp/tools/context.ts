@@ -10,6 +10,7 @@ import {
   getContextHistory,
   pushEvent,
 } from "../../store/redis.js";
+import { upsertContextVector } from "../../vector.js";
 
 // ---------------------------------------------------------------------------
 // Shared enum
@@ -134,6 +135,7 @@ export async function writeContext(
     version: "1.0",
   };
   await setContext(input.roomId, entry);
+  void upsertContextVector(input.roomId, entry.id, entry.summary);
 
   if (input.consuming_agents.length > 0) {
     await pushEvent(input.roomId, {
@@ -203,6 +205,7 @@ export async function updateContext(
   // Keep prior snapshot for get_context_history before overwrite.
   await pushContextHistory(input.roomId, existing);
   await setContext(input.roomId, updated);
+  void upsertContextVector(input.roomId, updated.id, updated.summary);
 
   if (updated.consuming_agents.length > 0) {
     await pushEvent(input.roomId, {

@@ -5,6 +5,7 @@ import { resolveKey, getKeyCount } from "./auth.js";
 import type { KeyContext } from "./types.js";
 import { log } from "./log.js";
 import { nanoid } from "nanoid";
+import { addWebhook, listWebhooks, removeWebhook } from "./webhooks.js";
 import {
   getPlan,
   getContextIndex,
@@ -131,6 +132,61 @@ app.get("/room/:roomId", requireAuth, async (c) => {
     log.error({ msg: "room", detail: `error fetching room ${roomId}: ${String(err)}` });
     return c.json({ error: "Failed to fetch room data" }, 500);
   }
+});
+
+/**
+ * SSE long-poll stream of room events (Upstash REST cannot SUBSCRIBE).
+ * Query: ?since=ISO8601 — only events after this timestamp.
+ */
+app.get("/rooms/:roomId/stream", requireAuth, async (c) => {
+  const roomId = c.req.param("roomId");
+  const keyCtx = c.get("keyCtx") as KeyContext;
+  try {
+    await assertRoomAccess(roomId, keyCtx);
+  } catch (err) {
+    if (err instanceof Error && err.message === ROOM_ACCESS_DENIED) {
+      return c.json({ error: ROOM_ACCESS_DENIED }, 403);
+    }
+    return c.json({ error: "Failed to open stream" }, 500);
+  }
+
+  let since = c.req.query("since") ?? new Date(0).toISOString();
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      const send = (chunk: string) => controller.enqueue(encoder.encode(chunk));
+      send(`: connected ${roomId}\n\n`);
+      let alive = true;
+      c.req.raw.signal.addEventListener("abort", () => {
+        alive = false;
+      });
+      while (alive) {
+        try {
+          const events = await getEvents(roomId, 50);
+          const fresh = events
+            .filter((e) => e.timestamp > since)
+            .sort((a, b) => (a.timestamp > b.timestamp ? 1 : -1));
+          for (const event of fresh) {
+            send(`event: message\ndata: ${JSON.stringify(event)}\n\n`);
+            since = event.timestamp;
+          }
+          send(`: heartbeat ${new Date().toISOString()}\n\n`);
+        } catch (err) {
+          log.warn({ msg: "stream.poll", err: String(err) });
+        }
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      controller.close();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    },
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -414,6 +470,59 @@ app.delete("/admin/rooms/:roomId/invites/:tokenId", requireAuth, requireTeamKey,
     log.error({ msg: "admin/invite", detail: `revoke error: ${String(err)}` });
     return c.json({ error: "Failed to revoke invite" }, 500);
   }
+});
+
+/**
+ * Webhooks for the authenticated team.
+ * POST body: { url, secret?, roomId? }
+ */
+app.get("/admin/webhooks", requireAuth, requireTeamKey, async (c) => {
+  const keyCtx = c.get("keyCtx") as KeyContext;
+  const hooks = await listWebhooks(keyCtx.teamId);
+  return c.json({
+    webhooks: hooks.map((h) => ({
+      id: h.id,
+      url: h.url,
+      roomId: h.roomId,
+      createdAt: h.createdAt,
+      secretHint: `****${h.secret.slice(-4)}`,
+    })),
+  });
+});
+
+app.post("/admin/webhooks", requireAuth, requireTeamKey, async (c) => {
+  const keyCtx = c.get("keyCtx") as KeyContext;
+  const body = (await c.req.json().catch(() => ({}))) as {
+    url?: string;
+    secret?: string;
+    roomId?: string;
+  };
+  if (!body.url || !/^https:\/\//i.test(body.url)) {
+    return c.json({ error: "url must be an https URL" }, 400);
+  }
+  const hook = await addWebhook(keyCtx.teamId, {
+    url: body.url,
+    secret: body.secret && body.secret.length >= 8 ? body.secret : nanoid(24),
+    roomId: body.roomId,
+  });
+  return c.json(
+    {
+      id: hook.id,
+      url: hook.url,
+      roomId: hook.roomId,
+      secret: hook.secret,
+      createdAt: hook.createdAt,
+      note: "Save the secret. It will not be shown again.",
+    },
+    201,
+  );
+});
+
+app.delete("/admin/webhooks/:webhookId", requireAuth, requireTeamKey, async (c) => {
+  const keyCtx = c.get("keyCtx") as KeyContext;
+  const ok = await removeWebhook(keyCtx.teamId, c.req.param("webhookId"));
+  if (!ok) return c.json({ error: "Webhook not found" }, 404);
+  return c.json({ ok: true });
 });
 
 // ---------------------------------------------------------------------------
