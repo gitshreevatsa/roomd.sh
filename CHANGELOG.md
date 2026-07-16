@@ -9,6 +9,24 @@ Both packages share a version number.
 
 ## [Unreleased]
 
+---
+
+## [0.4.0] - 2026-07-16
+
+Go-live product cut. roomd on Railway (`api.roomd.sh`), roomd-web on Vercel
+(`roomd.sh` marketing + `app.roomd.sh` dashboard), shared Upstash Redis.
+Owner portal can invite orgs, manage waitlist/users, and revoke access.
+
+### Added
+
+- **Owner Users directory.** `/owner/users` lists dashboard users/orgs with
+  Disable (revoke keys, keep row) vs Delete (revoke + remove), plus Enable.
+- **Disable vs Delete on invites and waitlist.** Distinct from soft-revoke history.
+- **Operator list-team-keys.** `GET /admin/teams/:teamId/keys` so revoke-all works
+  across an org's dynamic keys.
+- **Sign-out → roomd.sh.** Auth.js redirect allowlist for the marketing host;
+  optional `MARKETING_URL`.
+
 ### Fixed
 
 - **Event cursor delivery.** `get_unread_events` / `get_my_summary` now advance

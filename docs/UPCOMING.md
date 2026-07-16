@@ -1,6 +1,7 @@
 # roomd roadmap
 
-Current version: **v0.3.0**. 25 tools. Not deployed anywhere; local only.
+Current version: **v0.4.0**. Deployed: Railway (`api.roomd.sh`) + Vercel
+(`roomd.sh` / `app.roomd.sh`). Shared Upstash Redis.
 
 This file tracks what is left. Everything listed as built has a test covering it
 in `tests/`. Run `bun test` before trusting this document.
@@ -35,11 +36,20 @@ in `tests/`. Run `bun test` before trusting this document.
 | Constant-time comparison of static keys | `digestsMatch` in `src/auth.ts` |
 | `GET /room/:roomId` requires auth and room access | `src/index.ts` |
 
+### v0.4: go-live product
+| Item | Where |
+|---|---|
+| Railway + Vercel deploy, `roomd.sh` host split | `Dockerfile`, `docs/DEPLOY.md`, roomd-web middleware |
+| Owner portal (invite / waitlist / users / usage) | roomd-web `/owner` |
+| Email invites, named keys, multi-client setup | roomd-web + roomd `DynKey.note` |
+| Operator revoke any org key + list team keys | `DELETE /admin/keys/:id`, `GET /admin/teams/:teamId/keys` |
+| Marketing landing, protocol page, theme | roomd-web |
+
 ---
 
 ## Not built
 
-### v0.4: quality of life
+### v0.5: agent quality of life
 | Tool | Why |
 |---|---|
 | `delete_task` | Remove cancelled or duplicate tasks |
@@ -51,24 +61,24 @@ in `tests/`. Run `bun test` before trusting this document.
 | `leave_room` | Clean agent exit, drops presence immediately |
 | `list_rooms` | See the rooms your key owns. Needs a per-team room index. |
 
-| Infrastructure | Why |
+### v0.6: ops + history
+| Item | Why |
 |---|---|
 | Structured logging (JSON to stdout) | Searchable logs |
-| Context versioning | Append-only history rather than in-place update |
+| Context versioning history + `get_context_history` | Append-only history of updates |
+| `get_room_info` | Room metadata: created, owner, member count |
 | Auto-generated roomId | roomd-web does this today; the server does not |
+| GDPR self-service account deletion + data doc | Right to erasure |
 
 ### v1.0: scale
 | Item | Why |
 |---|---|
 | `search` | Full-text across context summaries, event payloads, task titles |
-| `get_context_history` | See all versions of a context entry |
-| `get_room_info` | Room metadata: created, owner, member count |
-| Redis pub/sub or SSE push | Real push instead of polling |
-| Upstash Vector | Semantic search over context |
+| SSE long-poll push (no Redis SUBSCRIBE on Upstash REST) | Real push instead of client-only polling |
+| Upstash Vector (optional) | Semantic search over context |
 | Webhook support | Notify an external URL when events are posted |
-| Deployment | No host chosen. See the note below. |
 
-### v1.x: polish
+### v1.1: polish
 | Item | Why |
 |---|---|
 | CLI: `roomd create-room` | Generates a shareable config snippet |
@@ -81,28 +91,20 @@ in `tests/`. Run `bun test` before trusting this document.
 
 ## Deployment
 
-The server deploys as a container (`Dockerfile` + optional `railway.json`) on
-**Fly.io, Render, or Railway**, and the dashboard (`roomd-web`) deploys to
-**Vercel**. Staging uses `roomd.dev`; production uses `roomd.sh`. Full local /
-stage / prod env matrices, DNS, and go-live checklist:
-[`../../docs/DEPLOY.md`](../../docs/DEPLOY.md).
-
-What the server needs is small: one long-lived process, the env vars in
-`.env.example`, and outbound HTTPS to Upstash. It is stateless, so any number of
-instances can run behind a load balancer. No live instance is running yet; the
-config and docs are in place to bring one up.
+Production is live: **Railway** (roomd) + **Vercel** (roomd-web), Upstash Redis.
+Staging may use `roomd.dev`. Full matrices: [`../../docs/DEPLOY.md`](../../docs/DEPLOY.md).
 
 ---
 
 ## Where to start next
 
 ```
-v0.4 tools, highest value first:
+v0.5 tools, highest value first:
 list_rooms  ->  needs team:{teamId}:rooms index written in assertRoomAccess
 leave_room  ->  cheap, drops the agent from the room's agents SET
 delete_task / delete_context  ->  scoped single-item deletes only
 
-Then:
+Then v0.6:
 structured logging  ->  makes everything after this debuggable
 ```
 
@@ -112,8 +114,8 @@ structured logging  ->  makes everything after this debuggable
 
 ### GDPR
 - **Triggered.** roomd-web stores user accounts, emails, and a waitlist.
-- Personal data lives under `app:user:*` and `app:waitlist` in Redis.
-- Right to erasure is not implemented. There is no account deletion flow.
+- Personal data lives under `app:user:*` and `app:waitlist` / `app:org-invites`.
+- Operator can disable/delete users; **self-service erasure** still TODO (v0.6).
 
 ### SOC 2
 - Not needed until an enterprise customer asks.
@@ -122,7 +124,8 @@ structured logging  ->  makes everything after this debuggable
 - [x] Request bodies are not logged. Only error messages are.
 - [x] Redis TTL on all room keys (30 days, refreshed on use).
 - [x] Secrets are stored hashed, never in plaintext.
+- [x] Operator disable/delete for dashboard users.
 
 ### Still to do
-- [ ] Account deletion in roomd-web (GDPR erasure)
+- [ ] Self-service account deletion in roomd-web (GDPR erasure)
 - [ ] Document what data is stored and where, for users
