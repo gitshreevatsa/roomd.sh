@@ -265,6 +265,25 @@ app.get("/admin/keys", requireAuth, requireTeamKey, async (c) => {
 });
 
 /**
+ * GET /admin/teams/:teamId/keys
+ * List dynamic keys for any team. Static operator keys only.
+ */
+app.get("/admin/teams/:teamId/keys", requireAuth, requireTeamKey, async (c) => {
+  const keyCtx = c.get("keyCtx") as KeyContext;
+  if (!keyCtx.isStatic) {
+    return c.json({ error: "Only static operator keys may list another team's keys" }, 403);
+  }
+  const teamId = c.req.param("teamId");
+  try {
+    const keys = await listDynamicKeys(teamId);
+    return c.json({ keys });
+  } catch (err) {
+    process.stderr.write(`[admin/teams/keys] list error: ${String(err)}\n`);
+    return c.json({ error: "Failed to list keys" }, 500);
+  }
+});
+
+/**
  * DELETE /admin/keys/:keyId
  * Revoke a dynamic key. Teams may revoke their own; static operator keys may
  * revoke any org key (dashboard owner pulling access).
