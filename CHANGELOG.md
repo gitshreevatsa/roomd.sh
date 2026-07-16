@@ -11,6 +11,21 @@ Both packages share a version number.
 
 ---
 
+## [1.1.0] - 2026-07-16
+
+Polish: CLI, templates, diffs, analytics, and push notify.
+
+### Added
+
+- **`diff_context`.** Diff current context vs a prior history version.
+- **`get_room_analytics`.** Completion rate, online agents, events/day.
+- **Room templates.** `list_templates` / `create_room_from_template` (blank, web-app, incident).
+- **CLI `bun run create-room`.** Claims a room and prints MCP config snippets.
+- **SSE session notify.** Open `/rooms/:id/stream` clients get events pushed via
+  in-process notify (poll remains fallback). MCP stays stateless HTTP.
+
+---
+
 ## [1.0.0] - 2026-07-16
 
 Scale features for live coordination without Redis SUBSCRIBE.

@@ -1,6 +1,6 @@
 # roomd roadmap
 
-Current version: **v1.0.0**. Deployed: Railway (`api.roomd.sh`) + Vercel
+Current version: **v1.1.0**. Deployed: Railway (`api.roomd.sh`) + Vercel
 (`roomd.sh` / `app.roomd.sh`). Shared Upstash Redis.
 
 This file tracks what is left. Everything listed as built has a test covering it
@@ -79,16 +79,20 @@ in `tests/`. Run `bun test` before trusting this document.
 
 ---
 
+### v1.1: polish
+| Item | Where |
+|---|---|
+| CLI `create-room` | `cli/create-room.ts`, `bun run create-room` |
+| SSE session notify | `notify.ts` + stream register |
+| Room templates | `templates.ts`, `tools/templates.ts` |
+| `diff_context` | `tools/diff.ts` |
+| `get_room_analytics` | `tools/analytics.ts` |
+
+---
+
 ## Not built
 
-### v1.1: polish
-| Item | Why |
-|---|---|
-| CLI: `roomd create-room` | Generates a shareable config snippet |
-| MCP server-initiated notifications | Server pushes to the agent unprompted |
-| Room templates | Start a room with a pre-filled plan |
-| `diff_context` | Show what changed between two versions |
-| Room analytics | Events per day, task completion rate |
+(None on the original roadmap. Future work goes here.)
 
 ---
 
