@@ -162,6 +162,15 @@ export class FakeRedis {
     return list.slice(start, end);
   }
 
+  async ltrim(key: string, start: number, stop: number): Promise<"OK"> {
+    const entry = this.live(key);
+    const list = Array.isArray(entry?.value) ? (entry.value as unknown as string[]) : [];
+    const end = stop < 0 ? list.length + stop + 1 : stop + 1;
+    const trimmed = list.slice(start, end);
+    this.store.set(key, { value: trimmed as unknown as Value, expiresAt: entry?.expiresAt ?? null });
+    return "OK";
+  }
+
   // -- hash commands -------------------------------------------------------
 
   async hset(key: string, fields: Record<string, string>): Promise<number> {

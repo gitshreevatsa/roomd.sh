@@ -3,8 +3,9 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { createMcpServer } from "./mcp/server.js";
 import { resolveKey, getKeyCount } from "./auth.js";
 import type { KeyContext } from "./types.js";
-import {
 import { log } from "./log.js";
+import { nanoid } from "nanoid";
+import {
   getPlan,
   getContextIndex,
   getAgents,
@@ -20,6 +21,7 @@ import { log } from "./log.js";
   storeInviteToken,
   listRoomInvites,
   revokeInviteToken,
+  listTeamRooms,
 } from "./store/redis.js";
 
 // ---------------------------------------------------------------------------
@@ -152,6 +154,41 @@ const requireTeamKey = async (c: any, next: () => Promise<void>) => {
 app.get("/admin/me", requireAuth, requireTeamKey, (c) => {
   const keyCtx = c.get("keyCtx") as KeyContext;
   return c.json({ teamId: keyCtx.teamId });
+});
+
+/**
+ * POST /admin/rooms
+ * Claim a room for the caller's team. Body may omit roomId to auto-generate one.
+ */
+app.post("/admin/rooms", requireAuth, requireTeamKey, async (c) => {
+  const keyCtx = c.get("keyCtx") as KeyContext;
+  let body: { roomId?: string } = {};
+  try {
+    body = (await c.req.json()) as { roomId?: string };
+  } catch {
+    body = {};
+  }
+  const roomId =
+    typeof body.roomId === "string" && body.roomId.trim()
+      ? body.roomId.trim()
+      : nanoid(12);
+  try {
+    await assertRoomAccess(roomId, keyCtx);
+    return c.json({ roomId, teamId: keyCtx.teamId }, 201);
+  } catch (err) {
+    if (err instanceof Error && err.message === ROOM_ACCESS_DENIED) {
+      return c.json({ error: ROOM_ACCESS_DENIED }, 403);
+    }
+    log.error({ msg: "admin/rooms", detail: String(err) });
+    return c.json({ error: "Failed to create room" }, 500);
+  }
+});
+
+/** List rooms owned by the authenticated team. */
+app.get("/admin/rooms", requireAuth, requireTeamKey, async (c) => {
+  const keyCtx = c.get("keyCtx") as KeyContext;
+  const rooms = await listTeamRooms(keyCtx.teamId);
+  return c.json({ rooms });
 });
 
 /**

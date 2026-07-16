@@ -65,7 +65,18 @@ export const keys = {
   teamRooms: (teamId: string) => `team:${teamId}:rooms`,
   review: (roomId: string, reviewId: string) => `${roomId}:review:${reviewId}`,
   reviewsIndex: (roomId: string) => `${roomId}:reviews`,
+  contextHistory: (roomId: string, contextId: string) =>
+    `${roomId}:context:${contextId}:history`,
+  roomMeta: (roomId: string) => `room:${roomId}:meta`,
 } as const;
+
+export interface RoomMeta {
+  roomId: string;
+  ownerTeamId: string;
+  createdAt: string;
+}
+
+const CONTEXT_HISTORY_CAP = 50;
 
 /** Lightweight review record stored per room (see mcp/tools/review.ts). */
 export interface StoredReview {
@@ -172,6 +183,70 @@ export async function getContextIndex(roomId: string): Promise<string[]> {
   } catch (err) {
     log.error({ msg: "redis.getContextIndex", err: String(err) });
     throw err;
+  }
+}
+
+/** Append a snapshot before overwrite; newest history entry is index 0. */
+export async function pushContextHistory(
+  roomId: string,
+  entry: ContextEntry,
+): Promise<void> {
+  try {
+    const key = keys.contextHistory(roomId, entry.id);
+    await redis.lpush(key, JSON.stringify(entry));
+    await redis.ltrim(key, 0, CONTEXT_HISTORY_CAP - 1);
+    await redis.expire(key, ROOM_TTL_SECONDS);
+  } catch (err) {
+    log.error({ msg: "redis.pushContextHistory", err: String(err) });
+    throw err;
+  }
+}
+
+export async function getContextHistory(
+  roomId: string,
+  contextId: string,
+): Promise<ContextEntry[]> {
+  try {
+    const raw = await redis.lrange(keys.contextHistory(roomId, contextId), 0, -1);
+    return raw.map((r) =>
+      typeof r === "string" ? (JSON.parse(r) as ContextEntry) : (r as ContextEntry),
+    );
+  } catch (err) {
+    log.error({ msg: "redis.getContextHistory", err: String(err) });
+    return [];
+  }
+}
+
+export async function ensureRoomMeta(
+  roomId: string,
+  ownerTeamId: string,
+): Promise<RoomMeta> {
+  const existing = await getRoomMeta(roomId);
+  if (existing) return existing;
+  const meta: RoomMeta = {
+    roomId,
+    ownerTeamId,
+    createdAt: new Date().toISOString(),
+  };
+  try {
+    await redis.set(keys.roomMeta(roomId), JSON.stringify(meta), {
+      nx: true,
+      ex: ROOM_TTL_SECONDS,
+    });
+  } catch (err) {
+    log.error({ msg: "redis.ensureRoomMeta", err: String(err) });
+  }
+  return (await getRoomMeta(roomId)) ?? meta;
+}
+
+export async function getRoomMeta(roomId: string): Promise<RoomMeta | null> {
+  try {
+    const raw = await redis.get<string | RoomMeta>(keys.roomMeta(roomId));
+    if (!raw) return null;
+    return typeof raw === "string" ? (JSON.parse(raw) as RoomMeta) : raw;
+  } catch (err) {
+    log.error({ msg: "redis.getRoomMeta", err: String(err) });
+    return null;
   }
 }
 
@@ -599,6 +674,7 @@ export async function assertRoomAccess(roomId: string, keyCtx: KeyContext): Prom
     }
     // Keep a per-team index so list_rooms does not scan the whole keyspace.
     await redis.sadd(keys.teamRooms(keyCtx.teamId), roomId);
+    await ensureRoomMeta(roomId, keyCtx.teamId);
     await touchRoomTtl(roomId);
   } catch (err) {
     if (err instanceof Error && err.message === ROOM_ACCESS_DENIED) throw err;

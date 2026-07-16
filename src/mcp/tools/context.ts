@@ -6,6 +6,8 @@ import {
   setContext,
   getContextIndex,
   deleteContextEntry,
+  pushContextHistory,
+  getContextHistory,
   pushEvent,
 } from "../../store/redis.js";
 
@@ -198,6 +200,8 @@ export async function updateContext(
     version: bumpVersion(existing.version),
   };
 
+  // Keep prior snapshot for get_context_history before overwrite.
+  await pushContextHistory(input.roomId, existing);
   await setContext(input.roomId, updated);
 
   if (updated.consuming_agents.length > 0) {
@@ -291,6 +295,20 @@ export const deleteContextInput = z.object({
   id: z.string().min(1),
   agentId: z.string().min(1).optional(),
 });
+
+export const getContextHistoryInput = z.object({
+  roomId: z.string().min(1),
+  id: z.string().min(1),
+});
+
+/** Prior versions of a context entry, newest history first (excludes current). */
+export async function getContextHistoryTool(
+  input: z.infer<typeof getContextHistoryInput>,
+): Promise<{ id: string; current: ContextEntry | null; history: ContextEntry[] }> {
+  const current = await getContext(input.roomId, input.id);
+  const history = await getContextHistory(input.roomId, input.id);
+  return { id: input.id, current, history };
+}
 
 /** Remove a stale or wrong context entry. */
 export async function deleteContext(

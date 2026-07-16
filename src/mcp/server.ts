@@ -37,7 +37,10 @@ import {
   updateContext,
   deleteContextInput,
   deleteContext,
+  getContextHistoryInput,
+  getContextHistoryTool,
 } from "./tools/context.js";
+import { getRoomInfoInput, getRoomInfo } from "./tools/info.js";
 import {
   postEventInput,
   postEvent,
@@ -303,6 +306,20 @@ export function createMcpServer(keyCtx: KeyContext): McpServer {
     "Remove a stale or wrong context entry from the room.",
     deleteContextInput,
     deleteContext,
+  );
+
+  tool(
+    "get_context_history",
+    "Return prior versions of a context entry (newest history first), plus the current version.",
+    getContextHistoryInput,
+    getContextHistoryTool,
+  );
+
+  tool(
+    "get_room_info",
+    "Room metadata: owner team, created time, member/task/context/event counts.",
+    getRoomInfoInput,
+    getRoomInfo,
   );
 
   // -------------------------------------------------------------------------
