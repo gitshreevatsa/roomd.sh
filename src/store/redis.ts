@@ -60,6 +60,8 @@ export const keys = {
   invite: (tokenHash: string) => `invite:${tokenHash}`,
   inviteById: (tokenId: string) => `inviteid:${tokenId}`,
   invitesByRoom: (roomId: string) => `room:${roomId}:invites`,
+  /** Set of roomIds owned by a team (for list_rooms). */
+  teamRooms: (teamId: string) => `team:${teamId}:rooms`,
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -504,11 +506,37 @@ export async function assertRoomAccess(roomId: string, keyCtx: KeyContext): Prom
         throw new Error(ROOM_ACCESS_DENIED);
       }
     }
+    // Keep a per-team index so list_rooms does not scan the whole keyspace.
+    await redis.sadd(keys.teamRooms(keyCtx.teamId), roomId);
     await touchRoomTtl(roomId);
   } catch (err) {
     if (err instanceof Error && err.message === ROOM_ACCESS_DENIED) throw err;
     process.stderr.write(`[redis] assertRoomAccess error: ${String(err)}\n`);
     throw err;
+  }
+}
+
+/**
+ * Rooms currently owned by this team. Stale index entries (expired ownership)
+ * are filtered out and removed.
+ */
+export async function listTeamRooms(teamId: string): Promise<string[]> {
+  try {
+    const roomIds = await redis.smembers(keys.teamRooms(teamId));
+    if (!roomIds.length) return [];
+    const owned: string[] = [];
+    for (const roomId of roomIds) {
+      const owner = await redis.get<string>(keys.roomOwner(roomId));
+      if (owner === teamId) {
+        owned.push(roomId);
+      } else {
+        await redis.srem(keys.teamRooms(teamId), roomId);
+      }
+    }
+    return owned.sort();
+  } catch (err) {
+    process.stderr.write(`[redis] listTeamRooms error: ${String(err)}\n`);
+    return [];
   }
 }
 

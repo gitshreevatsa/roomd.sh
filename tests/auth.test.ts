@@ -229,6 +229,26 @@ describe("assertRoomAccess", () => {
 
     await assertRoomAccess("room-1", teamB); // now claimable by anyone
   });
+
+  test("claiming a room indexes it under the team for list_rooms", async () => {
+    const { listTeamRooms } = await import("../src/store/redis");
+    await assertRoomAccess("room-a", teamA);
+    await assertRoomAccess("room-b", teamA);
+    await assertRoomAccess("room-c", teamB);
+
+    expect(await listTeamRooms("team-a")).toEqual(["room-a", "room-b"]);
+    expect(await listTeamRooms("team-b")).toEqual(["room-c"]);
+  });
+
+  test("listTeamRooms drops rooms whose ownership expired", async () => {
+    const { listTeamRooms } = await import("../src/store/redis");
+    await assertRoomAccess("room-1", teamA);
+
+    const later = Date.now() + 31 * 24 * 60 * 60 * 1000;
+    fakeRedis.now = () => later;
+
+    expect(await listTeamRooms("team-a")).toEqual([]);
+  });
 });
 
 describe("checkRateLimit", () => {
