@@ -1,21 +1,21 @@
 # roomd: agent coordination server
 
-roomd is an MCP server that lets multiple Claude Code instances share structured context, plans, API contracts, and events in real time. All state lives in Upstash Redis. Agents read and write structured data to it, humans supervise.
+roomd is an MCP server. Multiple coding agents join a room and share plan, context, events, presence, and locks. State lives in Upstash Redis. Humans watch from the dashboard.
 
-This is **not** a chat app. It is a coordination substrate for AI agents.
+Not a chat app.
 
-roomd is the reference implementation of the **Room Protocol**, the design written up in `../protocol/`. The protocol is the idea (rooms and the five primitives, over MCP); roomd is the server that runs it. This file documents the server.
+roomd is the reference implementation of the **Room Protocol** (`../protocol/`). The protocol is the design; this file is about the server.
 
-Version 0.3.0. 25 tools. Runs locally; deploys to Railway (see `../docs/DEPLOY.md`).
+Version tracks the package (`package.json`). Deploy notes: `../docs/DEPLOY.md`.
 
 ---
 
 ## Connecting an agent to this server
 
 Start the server (see `docs/SETUP.md`), then point your MCP client at it.
-Claude Code, Cursor, and other HTTP MCP clients all work — same URL and Bearer
-key, different config file. Full snippets for each client are in
-`docs/SETUP.md` and in the dashboard setup guide (tabbed).
+Claude Code, Cursor, and other HTTP MCP clients all work with the same URL and
+Bearer key; only the config file differs. Snippets: `docs/SETUP.md` and the
+dashboard setup guide.
 
 ### Claude Code
 

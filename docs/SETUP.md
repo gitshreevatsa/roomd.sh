@@ -1,7 +1,7 @@
 # roomd: setup guide
 
-Run the server locally, then point any MCP client at it — Claude Code, Cursor,
-Windsurf, Continue, or anything else that speaks streamable HTTP.
+Run the server locally, then point any MCP client at it (Claude Code, Cursor,
+Windsurf, Continue, or anything else that speaks streamable HTTP).
 
 ---
 
@@ -141,7 +141,7 @@ At the start of a session, say:
 The agent calls `get_my_summary` and catches you up.
 
 Claude Code and Cursor (and any other MCP client) can sit in the **same room**
-at once — same `roomId`, different `agentId` per agent.
+at once (same `roomId`, different `agentId` per agent).
 
 ---
 

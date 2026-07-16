@@ -13,7 +13,7 @@ export const ROOM_TEMPLATES: RoomTemplate[] = [
   {
     id: "blank",
     name: "Blank",
-    description: "Empty plan — start from scratch.",
+    description: "Empty plan. Start from scratch.",
     project: "Untitled",
     tasks: [],
   },

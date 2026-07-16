@@ -25,7 +25,7 @@ One idea, one thing that runs it. Same split as HTTP versus a web server.
 | **room** | The core primitive: one workspace, named by a `roomId`, that all coordination state lives under. | |
 | **roomd.sh** | The brand, domain, and docs site. | |
 
-You sell and run **roomd**; the **Room Protocol** is the standard underneath it, the same way you run nginx without thinking about the HTTP RFC. The protocol earns its own name in two places only: the whitepaper (where it's the intellectual contribution) and the docs (where it's formally specified so others could implement it).
+You run **roomd**. The **Room Protocol** is the design underneath it, the same way nginx sits under the HTTP RFC. The protocol shows up by name in the whitepaper and in the formal docs; everywhere else, talk about roomd.
 
 ---
 

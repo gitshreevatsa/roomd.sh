@@ -115,8 +115,7 @@ Owner portal can invite orgs, manage waitlist/users, and revoke access.
 
 - **Terminal green design system (refined).** Phosphor green as the accent;
   Geist Sans for UI reading, Geist Mono only for code/ids/feeds. Soft glow,
-  rounded panels, and breathing room — terminal signal without mono-everywhere
-  costume density.
+  rounded panels. Phosphor green accent; mono reserved for code and ids.
 
 - **Rebranded to roomd / the Room Protocol.** The product is now `roomd` (the
   server, lowercase), "the Room Protocol" (the spec), and `roomd.sh` (the
