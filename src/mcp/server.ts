@@ -19,6 +19,12 @@ import {
   getMyTasks,
   getMySummaryInput,
   getMySummary,
+  deleteTaskInput,
+  deleteTask,
+  setTaskPriorityInput,
+  setTaskPriority,
+  addDependencyInput,
+  addDependency,
 } from "./tools/plan.js";
 import {
   writeContextInput,
@@ -29,6 +35,8 @@ import {
   listContext,
   updateContextInput,
   updateContext,
+  deleteContextInput,
+  deleteContext,
 } from "./tools/context.js";
 import {
   postEventInput,
@@ -43,6 +51,8 @@ import {
   getEventReadsTool,
   replyToEventInput,
   replyToEvent,
+  deleteEventInput,
+  deleteEvent,
 } from "./tools/events.js";
 import {
   heartbeatInput,
@@ -225,6 +235,27 @@ export function createMcpServer(keyCtx: KeyContext): McpServer {
     getMySummary,
   );
 
+  tool(
+    "delete_task",
+    "Remove a cancelled or duplicate task from the room plan.",
+    deleteTaskInput,
+    deleteTask,
+  );
+
+  tool(
+    "set_task_priority",
+    "Set a task's priority (lower number = higher importance).",
+    setTaskPriorityInput,
+    setTaskPriority,
+  );
+
+  tool(
+    "add_dependency",
+    "Declare that one task depends on another after both exist.",
+    addDependencyInput,
+    addDependency,
+  );
+
   // -------------------------------------------------------------------------
   // Context
   // -------------------------------------------------------------------------
@@ -255,6 +286,13 @@ export function createMcpServer(keyCtx: KeyContext): McpServer {
     "Update an existing context entry in place and bump its version. Use this when an API contract evolves instead of writing a second entry.",
     updateContextInput,
     updateContext,
+  );
+
+  tool(
+    "delete_context",
+    "Remove a stale or wrong context entry from the room.",
+    deleteContextInput,
+    deleteContext,
   );
 
   // -------------------------------------------------------------------------
@@ -301,6 +339,13 @@ export function createMcpServer(keyCtx: KeyContext): McpServer {
     "Post an event that is explicitly linked to a previous event. Enables threaded conversations between agents.",
     replyToEventInput,
     replyToEvent,
+  );
+
+  tool(
+    "delete_event",
+    "Remove one event from the room log (cleanup of processed noise).",
+    deleteEventInput,
+    deleteEvent,
   );
 
   // -------------------------------------------------------------------------

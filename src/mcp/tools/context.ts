@@ -1,7 +1,13 @@
 import { z } from "zod";
 import { nanoid } from "nanoid";
 import type { ContextEntry, ContextType } from "../../types.js";
-import { getContext, setContext, getContextIndex, pushEvent } from "../../store/redis.js";
+import {
+  getContext,
+  setContext,
+  getContextIndex,
+  deleteContextEntry,
+  pushEvent,
+} from "../../store/redis.js";
 
 // ---------------------------------------------------------------------------
 // Shared enum
@@ -274,4 +280,36 @@ export async function listContext(
     filtered = filtered.filter((e) => e.author === input.author);
   }
   return filtered;
+}
+
+// ---------------------------------------------------------------------------
+// deleteContext
+// ---------------------------------------------------------------------------
+
+export const deleteContextInput = z.object({
+  roomId: z.string().min(1),
+  id: z.string().min(1),
+  agentId: z.string().min(1).optional(),
+});
+
+/** Remove a stale or wrong context entry. */
+export async function deleteContext(
+  input: z.infer<typeof deleteContextInput>,
+): Promise<{ deleted: boolean; id: string }> {
+  const existing = await getContext(input.roomId, input.id);
+  if (!existing) {
+    throw new Error(`ContextEntry not found: ${input.id}`);
+  }
+  await deleteContextEntry(input.roomId, input.id);
+  const now = new Date().toISOString();
+  await pushEvent(input.roomId, {
+    id: nanoid(),
+    type: "context_deleted",
+    from: input.agentId ?? existing.author,
+    to: "all",
+    payload: { contextId: input.id, contextType: existing.type, summary: existing.summary },
+    timestamp: now,
+    read_by: [],
+  });
+  return { deleted: true, id: input.id };
 }

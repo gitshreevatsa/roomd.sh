@@ -221,6 +221,140 @@ export async function getUnblockedTasks(
 }
 
 // ---------------------------------------------------------------------------
+// deleteTask
+// ---------------------------------------------------------------------------
+
+export const deleteTaskInput = z.object({
+  roomId: z.string().min(1),
+  taskId: z.string().min(1),
+  agentId: z.string().min(1).optional(),
+});
+
+/** Remove one task from the plan and notify peers. */
+export async function deleteTask(
+  input: z.infer<typeof deleteTaskInput>,
+): Promise<{ deleted: boolean; taskId: string }> {
+  return withPlanLock(input.roomId, async () => {
+    const plan = await readPlan({ roomId: input.roomId });
+    const idx = plan.tasks.findIndex((t) => t.id === input.taskId);
+    if (idx === -1) {
+      throw new Error(`Task not found: ${input.taskId}`);
+    }
+    const [removed] = plan.tasks.splice(idx, 1);
+    const now = new Date().toISOString();
+    plan.updated_at = now;
+    await setPlan(input.roomId, plan);
+
+    await pushEvent(input.roomId, {
+      id: nanoid(),
+      type: "task_deleted",
+      from: input.agentId ?? "system",
+      to: "all",
+      payload: { taskId: input.taskId, task: removed },
+      timestamp: now,
+      read_by: [],
+    });
+
+    return { deleted: true, taskId: input.taskId };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// setTaskPriority
+// ---------------------------------------------------------------------------
+
+export const setTaskPriorityInput = z.object({
+  roomId: z.string().min(1),
+  taskId: z.string().min(1),
+  priority: z.number().int(),
+  agentId: z.string().min(1).optional(),
+});
+
+/** Set a task's priority (lower = more important). */
+export async function setTaskPriority(
+  input: z.infer<typeof setTaskPriorityInput>,
+): Promise<Task> {
+  return withPlanLock(input.roomId, async () => {
+    const plan = await readPlan({ roomId: input.roomId });
+    const idx = plan.tasks.findIndex((t) => t.id === input.taskId);
+    if (idx === -1) throw new Error(`Task not found: ${input.taskId}`);
+    const existing = plan.tasks[idx]!;
+    const updated: Task = {
+      ...existing,
+      priority: input.priority,
+      updated_at: new Date().toISOString(),
+    };
+    plan.tasks[idx] = updated;
+    plan.updated_at = updated.updated_at;
+    await setPlan(input.roomId, plan);
+
+    await pushEvent(input.roomId, {
+      id: nanoid(),
+      type: "task_updated",
+      from: input.agentId ?? updated.owner ?? "system",
+      to: "all",
+      payload: { task: updated, previousStatus: existing.status },
+      timestamp: updated.updated_at,
+      read_by: [],
+    });
+
+    return updated;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// addDependency
+// ---------------------------------------------------------------------------
+
+export const addDependencyInput = z.object({
+  roomId: z.string().min(1),
+  taskId: z.string().min(1),
+  dependsOn: z.string().min(1),
+  agentId: z.string().min(1).optional(),
+});
+
+/** Declare that taskId depends on dependsOn (idempotent). */
+export async function addDependency(
+  input: z.infer<typeof addDependencyInput>,
+): Promise<Task> {
+  return withPlanLock(input.roomId, async () => {
+    const plan = await readPlan({ roomId: input.roomId });
+    if (!plan.tasks.some((t) => t.id === input.dependsOn)) {
+      throw new Error(`Dependency task not found: ${input.dependsOn}`);
+    }
+    const idx = plan.tasks.findIndex((t) => t.id === input.taskId);
+    if (idx === -1) throw new Error(`Task not found: ${input.taskId}`);
+    if (input.taskId === input.dependsOn) {
+      throw new Error("A task cannot depend on itself");
+    }
+    const existing = plan.tasks[idx]!;
+    const depends_on = existing.depends_on.includes(input.dependsOn)
+      ? existing.depends_on
+      : [...existing.depends_on, input.dependsOn];
+    const updated: Task = {
+      ...existing,
+      depends_on,
+      updated_at: new Date().toISOString(),
+    };
+    plan.tasks[idx] = updated;
+    plan.updated_at = updated.updated_at;
+    await setPlan(input.roomId, plan);
+
+    await pushEvent(input.roomId, {
+      id: nanoid(),
+      type: "task_updated",
+      from: input.agentId ?? updated.owner ?? "system",
+      to: "all",
+      payload: { task: updated, previousStatus: existing.status },
+      timestamp: updated.updated_at,
+      read_by: [],
+    });
+
+    return updated;
+  });
+}
+
+// ---------------------------------------------------------------------------
 // getMyTasks
 // ---------------------------------------------------------------------------
 

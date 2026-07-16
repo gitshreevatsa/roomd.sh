@@ -27,6 +27,8 @@ export interface Task {
   created_at: string;
   updated_at: string;
   depends_on: string[];
+  /** Lower number = higher importance. Optional for back-compat. */
+  priority?: number;
 }
 
 export interface Plan {

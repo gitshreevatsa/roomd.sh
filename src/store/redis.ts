@@ -157,6 +157,53 @@ export async function getContextIndex(roomId: string): Promise<string[]> {
   }
 }
 
+/** Delete one context entry and remove it from the room index. */
+export async function deleteContextEntry(
+  roomId: string,
+  contextId: string,
+): Promise<boolean> {
+  try {
+    const existing = await getContext(roomId, contextId);
+    if (!existing) return false;
+    await redis.del(keys.context(roomId, contextId));
+    await redis.srem(keys.contextIndex(roomId), contextId);
+    return true;
+  } catch (err) {
+    process.stderr.write(`[redis] deleteContextEntry error: ${String(err)}\n`);
+    throw err;
+  }
+}
+
+/**
+ * Remove one event by id from the room log. Rebuilds the list (newest-first).
+ * Returns false when the event is not found.
+ */
+export async function deleteEventById(
+  roomId: string,
+  eventId: string,
+): Promise<boolean> {
+  try {
+    const raw = await redis.lrange(keys.events(roomId), 0, -1);
+    const events = raw.map((r) =>
+      typeof r === "string" ? (JSON.parse(r) as Event) : (r as Event),
+    );
+    const kept = events.filter((e) => e.id !== eventId);
+    if (kept.length === events.length) return false;
+    await redis.del(keys.events(roomId));
+    if (kept.length > 0) {
+      // LPUSH in reverse so the first element stays newest.
+      for (let i = kept.length - 1; i >= 0; i--) {
+        await redis.lpush(keys.events(roomId), JSON.stringify(kept[i]));
+      }
+      await redis.expire(keys.events(roomId), ROOM_TTL_SECONDS);
+    }
+    return true;
+  } catch (err) {
+    process.stderr.write(`[redis] deleteEventById error: ${String(err)}\n`);
+    throw err;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Event helpers
 // ---------------------------------------------------------------------------

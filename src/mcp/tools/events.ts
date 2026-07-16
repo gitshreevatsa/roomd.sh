@@ -8,6 +8,7 @@ import {
   setEventCursor,
   markEventRead,
   getEventReaders,
+  deleteEventById,
 } from "../../store/redis.js";
 
 // ---------------------------------------------------------------------------
@@ -192,4 +193,35 @@ export async function replyToEvent(
   };
   await pushEvent(input.roomId, event);
   return event;
+}
+
+// ---------------------------------------------------------------------------
+// deleteEvent
+// ---------------------------------------------------------------------------
+
+export const deleteEventInput = z.object({
+  roomId: z.string().min(1),
+  eventId: z.string().min(1),
+  agentId: z.string().min(1).optional(),
+});
+
+/** Remove one event from the room log (cleanup of processed noise). */
+export async function deleteEvent(
+  input: z.infer<typeof deleteEventInput>,
+): Promise<{ deleted: boolean; eventId: string }> {
+  const ok = await deleteEventById(input.roomId, input.eventId);
+  if (!ok) {
+    throw new Error(`Event not found: ${input.eventId}`);
+  }
+  const now = new Date().toISOString();
+  await pushEvent(input.roomId, {
+    id: nanoid(),
+    type: "event_deleted",
+    from: input.agentId ?? "system",
+    to: "all",
+    payload: { eventId: input.eventId },
+    timestamp: now,
+    read_by: [],
+  });
+  return { deleted: true, eventId: input.eventId };
 }
