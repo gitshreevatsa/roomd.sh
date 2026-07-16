@@ -33,3 +33,6 @@ Dynamic keys and invites are team/room scoped; no email is required on the serve
 ## Contact
 
 For erasure requests beyond self-service, contact the deployment operator.
+
+## Optional: Upstash Vector
+Set `UPSTASH_VECTOR_REST_URL` and `UPSTASH_VECTOR_REST_TOKEN` on roomd for `search` with `semantic:true`.

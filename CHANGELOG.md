@@ -11,6 +11,21 @@ Both packages share a version number.
 
 ---
 
+## [1.0.0] - 2026-07-16
+
+Scale features for live coordination without Redis SUBSCRIBE.
+
+### Added
+
+- **`search`.** Lexical full-text across tasks, context, and recent events;
+  optional `semantic:true` via Upstash Vector when configured.
+- **SSE stream.** `GET /rooms/:roomId/stream` long-polls new events (REST-safe).
+- **`wait_for_events`.** MCP-friendly short block until unread events arrive.
+- **Webhooks.** Team HTTPS endpoints with HMAC (`X-Roomd-Signature`) on
+  `pushEvent`; Admin UI in roomd-web.
+
+---
+
 ## [0.6.0] - 2026-07-16
 
 Ops, history, and compliance for a production deployment.

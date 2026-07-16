@@ -1,6 +1,6 @@
 # roomd roadmap
 
-Current version: **v0.6.0**. Deployed: Railway (`api.roomd.sh`) + Vercel
+Current version: **v1.0.0**. Deployed: Railway (`api.roomd.sh`) + Vercel
 (`roomd.sh` / `app.roomd.sh`). Shared Upstash Redis.
 
 This file tracks what is left. Everything listed as built has a test covering it
@@ -71,12 +71,15 @@ in `tests/`. Run `bun test` before trusting this document.
 ## Not built (continued)
 
 ### v1.0: scale
-| Item | Why |
+| Item | Where |
 |---|---|
-| `search` | Full-text across context summaries, event payloads, task titles |
-| SSE long-poll push (no Redis SUBSCRIBE on Upstash REST) | Real push instead of client-only polling |
-| Upstash Vector (optional) | Semantic search over context |
-| Webhook support | Notify an external URL when events are posted |
+| Lexical + optional Vector `search` | `tools/search.ts`, `vector.ts` |
+| SSE `/rooms/:id/stream` + `wait_for_events` | `index.ts`, `tools/wait.ts` |
+| Webhooks + Admin UI | `webhooks.ts`, roomd-web `/admin` |
+
+---
+
+## Not built
 
 ### v1.1: polish
 | Item | Why |
