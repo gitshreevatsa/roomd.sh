@@ -82,6 +82,16 @@ import {
   leaveRoomInput,
   leaveRoom,
 } from "./tools/rooms.js";
+import {
+  requestReviewInput,
+  requestReview,
+  approveInput,
+  approve,
+  rejectInput,
+  reject,
+  listReviewsInput,
+  listReviewsTool,
+} from "./tools/review.js";
 
 /**
  * Every tool takes a roomId. Constraining the shape this way means a tool that
@@ -434,6 +444,38 @@ export function createMcpServer(keyCtx: KeyContext): McpServer {
     "Leave a room immediately: drop your presence and notify other agents.",
     leaveRoomInput,
     leaveRoom,
+  );
+
+  // -------------------------------------------------------------------------
+  // Reviews
+  // -------------------------------------------------------------------------
+
+  tool(
+    "request_review",
+    "Ask another agent to approve or reject a task or context entry.",
+    requestReviewInput,
+    requestReview,
+  );
+
+  tool(
+    "approve",
+    "Approve a pending review (must be the assigned reviewer).",
+    approveInput,
+    approve,
+  );
+
+  tool(
+    "reject",
+    "Reject a pending review (must be the assigned reviewer).",
+    rejectInput,
+    reject,
+  );
+
+  tool(
+    "list_reviews",
+    "List reviews in the room, optionally filtered by status.",
+    listReviewsInput,
+    listReviewsTool,
   );
 
   return server;

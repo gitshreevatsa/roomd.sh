@@ -62,7 +62,24 @@ export const keys = {
   invitesByRoom: (roomId: string) => `room:${roomId}:invites`,
   /** Set of roomIds owned by a team (for list_rooms). */
   teamRooms: (teamId: string) => `team:${teamId}:rooms`,
+  review: (roomId: string, reviewId: string) => `${roomId}:review:${reviewId}`,
+  reviewsIndex: (roomId: string) => `${roomId}:reviews`,
 } as const;
+
+/** Lightweight review record stored per room (see mcp/tools/review.ts). */
+export interface StoredReview {
+  id: string;
+  roomId: string;
+  targetType: "task" | "context";
+  targetId: string;
+  requestedBy: string;
+  reviewer: string;
+  status: "pending" | "approved" | "rejected";
+  note?: string;
+  createdAt: string;
+  resolvedAt?: string;
+  resolvedBy?: string;
+}
 
 // ---------------------------------------------------------------------------
 // Room TTL
@@ -586,6 +603,58 @@ export async function assertRoomAccess(roomId: string, keyCtx: KeyContext): Prom
     if (err instanceof Error && err.message === ROOM_ACCESS_DENIED) throw err;
     process.stderr.write(`[redis] assertRoomAccess error: ${String(err)}\n`);
     throw err;
+  }
+}
+
+export async function setReview(roomId: string, review: StoredReview): Promise<void> {
+  try {
+    await redis.set(keys.review(roomId, review.id), JSON.stringify(review), {
+      ex: ROOM_TTL_SECONDS,
+    });
+    await redis.sadd(keys.reviewsIndex(roomId), review.id);
+    await redis.expire(keys.reviewsIndex(roomId), ROOM_TTL_SECONDS);
+  } catch (err) {
+    process.stderr.write(`[redis] setReview error: ${String(err)}\n`);
+    throw err;
+  }
+}
+
+export async function getReview(
+  roomId: string,
+  reviewId: string,
+): Promise<StoredReview | null> {
+  try {
+    const raw = await redis.get<string | StoredReview>(keys.review(roomId, reviewId));
+    if (!raw) return null;
+    return typeof raw === "string" ? (JSON.parse(raw) as StoredReview) : raw;
+  } catch (err) {
+    process.stderr.write(`[redis] getReview error: ${String(err)}\n`);
+    throw err;
+  }
+}
+
+export async function deleteReview(roomId: string, reviewId: string): Promise<void> {
+  try {
+    await redis.del(keys.review(roomId, reviewId));
+    await redis.srem(keys.reviewsIndex(roomId), reviewId);
+  } catch (err) {
+    process.stderr.write(`[redis] deleteReview error: ${String(err)}\n`);
+    throw err;
+  }
+}
+
+export async function listReviews(roomId: string): Promise<StoredReview[]> {
+  try {
+    const ids = await redis.smembers(keys.reviewsIndex(roomId));
+    const out: StoredReview[] = [];
+    for (const id of ids) {
+      const r = await getReview(roomId, id);
+      if (r) out.push(r);
+    }
+    return out.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  } catch (err) {
+    process.stderr.write(`[redis] listReviews error: ${String(err)}\n`);
+    return [];
   }
 }
 
