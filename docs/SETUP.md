@@ -159,6 +159,19 @@ The room endpoint needs auth. Without a key that owns the room it returns 401 or
 
 ---
 
+## 3. Create a room from the CLI
+
+```bash
+ROOMD_URL=http://localhost:3010 \
+ROOMD_API_KEY=your-team-secret \
+bun run create-room
+# optional: bun run create-room my-room --template web-app
+```
+
+Prints Claude Code and Cursor MCP snippets plus the room id.
+
+---
+
 ## Common problems
 
 **Every request returns 401.** The `Authorization` header must read `Bearer <secret>`, and the secret must match the value half of an `API_KEYS` pair exactly.

@@ -43,6 +43,14 @@ import {
 import { getRoomInfoInput, getRoomInfo } from "./tools/info.js";
 import { searchInput, search } from "./tools/search.js";
 import { waitForEventsInput, waitForEvents } from "./tools/wait.js";
+import { diffContextInput, diffContext } from "./tools/diff.js";
+import { getRoomAnalyticsInput, getRoomAnalytics } from "./tools/analytics.js";
+import {
+  listTemplatesInput,
+  listTemplates,
+  createRoomFromTemplateInput,
+  createRoomFromTemplate,
+} from "./tools/templates.js";
 import {
   postEventInput,
   postEvent,
@@ -336,6 +344,38 @@ export function createMcpServer(keyCtx: KeyContext): McpServer {
     "Block briefly (up to timeoutMs) until unread events arrive for your agent. MCP-friendly alternative to SSE.",
     waitForEventsInput,
     waitForEvents,
+  );
+
+  tool(
+    "diff_context",
+    "Diff the current context entry against a prior version from history.",
+    diffContextInput,
+    diffContext,
+  );
+
+  tool(
+    "get_room_analytics",
+    "Room analytics: task completion rate, online agents, events per day.",
+    getRoomAnalyticsInput,
+    getRoomAnalytics,
+  );
+
+  registerTeamTool(
+    server,
+    keyCtx,
+    "list_templates",
+    "List built-in room templates (blank, web-app, incident, …).",
+    listTemplatesInput,
+    async (input) => listTemplates(input),
+  );
+
+  registerTeamTool(
+    server,
+    keyCtx,
+    "create_room_from_template",
+    "Create (or claim) a room and seed its plan from a template. Omits roomId to auto-generate.",
+    createRoomFromTemplateInput,
+    createRoomFromTemplate,
   );
 
   // -------------------------------------------------------------------------

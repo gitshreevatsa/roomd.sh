@@ -306,13 +306,16 @@ export async function pushEvent(roomId: string, event: Event): Promise<void> {
   try {
     await redis.lpush(keys.events(roomId), JSON.stringify(event));
     await redis.expire(keys.events(roomId), ROOM_TTL_SECONDS);
-    // Fire webhooks without blocking the tool call.
+    // Fire webhooks + in-process SSE/MCP session notify without blocking.
     const owner = await redis.get<string>(keys.roomOwner(roomId));
     if (owner) {
       void import("../webhooks.js").then(({ dispatchWebhooks }) =>
         dispatchWebhooks(owner, roomId, event),
       );
     }
+    void import("../notify.js").then(({ notifyRoomEvent }) =>
+      notifyRoomEvent(roomId, event),
+    );
   } catch (err) {
     log.error({ msg: "redis.pushEvent", err: String(err) });
     throw err;

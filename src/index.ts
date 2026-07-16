@@ -6,6 +6,7 @@ import type { KeyContext } from "./types.js";
 import { log } from "./log.js";
 import { nanoid } from "nanoid";
 import { addWebhook, listWebhooks, removeWebhook } from "./webhooks.js";
+import { registerSession } from "./notify.js";
 import {
   getPlan,
   getContextIndex,
@@ -154,11 +155,30 @@ app.get("/rooms/:roomId/stream", requireAuth, async (c) => {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
-      const send = (chunk: string) => controller.enqueue(encoder.encode(chunk));
+      const send = (chunk: string) => {
+        try {
+          controller.enqueue(encoder.encode(chunk));
+        } catch {
+          /* closed */
+        }
+      };
       send(`: connected ${roomId}\n\n`);
       let alive = true;
+      // Prefer push from notifyRoomEvent when events land; poll as fallback.
+      const unregister = registerSession(roomId, async (payload) => {
+        const data = payload as { params?: { data?: { event?: unknown } } };
+        const event = data.params?.data?.event;
+        if (event && typeof event === "object" && event !== null && "timestamp" in event) {
+          const ts = String((event as { timestamp: string }).timestamp);
+          if (ts > since) {
+            send(`event: message\ndata: ${JSON.stringify(event)}\n\n`);
+            since = ts;
+          }
+        }
+      });
       c.req.raw.signal.addEventListener("abort", () => {
         alive = false;
+        unregister();
       });
       while (alive) {
         try {
@@ -176,6 +196,7 @@ app.get("/rooms/:roomId/stream", requireAuth, async (c) => {
         }
         await new Promise((r) => setTimeout(r, 1000));
       }
+      unregister();
       controller.close();
     },
   });
