@@ -483,7 +483,7 @@ described a deploy that never happened has been removed.
 
 ### Documentation
 
-Corrected, not just extended. These docs actively lied before:
+Corrected earlier docs that were wrong:
 
 - `roomd/docs/UPCOMING.md` listed multi-tenant API keys, room ownership,
   rate limiting, and the entire invite system as "Not built". All four had been

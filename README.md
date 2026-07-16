@@ -15,7 +15,7 @@ rather than a transcript to replay.
 
 ## roomd vs the Room Protocol
 
-One idea, one thing that runs it. Same split as HTTP versus a web server.
+The protocol is the design; roomd is the server. Same split as HTTP versus nginx.
 
 | Name | What it is | Rule of thumb |
 |---|---|---|
