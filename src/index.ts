@@ -4,6 +4,7 @@ import { createMcpServer } from "./mcp/server.js";
 import { resolveKey, getKeyCount } from "./auth.js";
 import type { KeyContext } from "./types.js";
 import {
+import { log } from "./log.js";
   getPlan,
   getContextIndex,
   getAgents,
@@ -125,7 +126,7 @@ app.get("/room/:roomId", requireAuth, async (c) => {
     if (err instanceof Error && err.message === ROOM_ACCESS_DENIED) {
       return c.json({ error: ROOM_ACCESS_DENIED }, 403);
     }
-    process.stderr.write(`[room] error fetching room ${roomId}: ${String(err)}\n`);
+    log.error({ msg: "room", detail: `error fetching room ${roomId}: ${String(err)}` });
     return c.json({ error: "Failed to fetch room data" }, 500);
   }
 });
@@ -186,7 +187,7 @@ app.get("/admin/rooms/:roomId/stats", requireAuth, requireTeamKey, async (c) => 
       lastActivity: recent[0]?.timestamp ?? null,
     });
   } catch (err) {
-    process.stderr.write(`[admin/stats] error: ${String(err)}\n`);
+    log.error({ msg: "admin/stats", detail: `error: ${String(err)}` });
     return c.json({ error: "Failed to read room stats" }, 500);
   }
 });
@@ -221,7 +222,7 @@ app.post("/admin/keys/provision", requireAuth, requireTeamKey, async (c) => {
       message: "Save this secret. It will not be shown again.",
     }, 201);
   } catch (err) {
-    process.stderr.write(`[admin/provision] error: ${String(err)}\n`);
+    log.error({ msg: "admin/provision", detail: `error: ${String(err)}` });
     return c.json({ error: "Failed to provision team" }, 500);
   }
 });
@@ -244,7 +245,7 @@ app.post("/admin/keys", requireAuth, requireTeamKey, async (c) => {
       message: "Save this secret. It will not be shown again.",
     }, 201);
   } catch (err) {
-    process.stderr.write(`[admin/keys] create error: ${String(err)}\n`);
+    log.error({ msg: "admin/keys", detail: `create error: ${String(err)}` });
     return c.json({ error: "Failed to create key" }, 500);
   }
 });
@@ -259,7 +260,7 @@ app.get("/admin/keys", requireAuth, requireTeamKey, async (c) => {
     const keys = await listDynamicKeys(keyCtx.teamId);
     return c.json({ keys });
   } catch (err) {
-    process.stderr.write(`[admin/keys] list error: ${String(err)}\n`);
+    log.error({ msg: "admin/keys", detail: `list error: ${String(err)}` });
     return c.json({ error: "Failed to list keys" }, 500);
   }
 });
@@ -278,7 +279,7 @@ app.get("/admin/teams/:teamId/keys", requireAuth, requireTeamKey, async (c) => {
     const keys = await listDynamicKeys(teamId);
     return c.json({ keys });
   } catch (err) {
-    process.stderr.write(`[admin/teams/keys] list error: ${String(err)}\n`);
+    log.error({ msg: "admin/teams/keys", detail: `list error: ${String(err)}` });
     return c.json({ error: "Failed to list keys" }, 500);
   }
 });
@@ -297,7 +298,7 @@ app.delete("/admin/keys/:keyId", requireAuth, requireTeamKey, async (c) => {
     if (!ok) return c.json({ error: "Key not found or not owned by your team" }, 404);
     return c.json({ ok: true, keyId });
   } catch (err) {
-    process.stderr.write(`[admin/keys] revoke error: ${String(err)}\n`);
+    log.error({ msg: "admin/keys", detail: `revoke error: ${String(err)}` });
     return c.json({ error: "Failed to revoke key" }, 500);
   }
 });
@@ -331,7 +332,7 @@ app.post("/admin/rooms/:roomId/invite", requireAuth, requireTeamKey, async (c) =
     if (err instanceof Error && err.message === ROOM_ACCESS_DENIED) {
       return c.json({ error: ROOM_ACCESS_DENIED }, 403);
     }
-    process.stderr.write(`[admin/invite] create error: ${String(err)}\n`);
+    log.error({ msg: "admin/invite", detail: `create error: ${String(err)}` });
     return c.json({ error: "Failed to create invite" }, 500);
   }
 });
@@ -351,7 +352,7 @@ app.get("/admin/rooms/:roomId/invites", requireAuth, requireTeamKey, async (c) =
     if (err instanceof Error && err.message === ROOM_ACCESS_DENIED) {
       return c.json({ error: ROOM_ACCESS_DENIED }, 403);
     }
-    process.stderr.write(`[admin/invite] list error: ${String(err)}\n`);
+    log.error({ msg: "admin/invite", detail: `list error: ${String(err)}` });
     return c.json({ error: "Failed to list invites" }, 500);
   }
 });
@@ -373,7 +374,7 @@ app.delete("/admin/rooms/:roomId/invites/:tokenId", requireAuth, requireTeamKey,
     if (err instanceof Error && err.message === ROOM_ACCESS_DENIED) {
       return c.json({ error: ROOM_ACCESS_DENIED }, 403);
     }
-    process.stderr.write(`[admin/invite] revoke error: ${String(err)}\n`);
+    log.error({ msg: "admin/invite", detail: `revoke error: ${String(err)}` });
     return c.json({ error: "Failed to revoke invite" }, 500);
   }
 });

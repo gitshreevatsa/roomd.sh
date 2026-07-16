@@ -2,6 +2,7 @@ import { nanoid } from "nanoid";
 import { createHash } from "node:crypto";
 import { Redis } from "@upstash/redis";
 import type { AgentPresence, ContextEntry, Event, KeyContext, Plan } from "../types.js";
+import { log } from "../log.js";
 
 const HEARTBEAT_TTL_SECONDS = 120;
 
@@ -103,7 +104,7 @@ export async function touchRoomTtl(roomId: string): Promise<void> {
     await pipeline.exec();
   } catch (err) {
     // TTL refresh is best effort. A failure here must not fail the tool call.
-    process.stderr.write(`[redis] touchRoomTtl error: ${String(err)}\n`);
+    log.error({ msg: "redis.touchRoomTtl", err: String(err) });
   }
 }
 
@@ -116,7 +117,7 @@ export async function getPlan(roomId: string): Promise<Plan | null> {
   try {
     return await redis.get<Plan>(keys.plan(roomId));
   } catch (err) {
-    process.stderr.write(`[redis] getPlan error: ${String(err)}\n`);
+    log.error({ msg: "redis.getPlan", err: String(err) });
     throw err;
   }
 }
@@ -126,7 +127,7 @@ export async function setPlan(roomId: string, plan: Plan): Promise<void> {
   try {
     await redis.set(keys.plan(roomId), JSON.stringify(plan), { ex: ROOM_TTL_SECONDS });
   } catch (err) {
-    process.stderr.write(`[redis] setPlan error: ${String(err)}\n`);
+    log.error({ msg: "redis.setPlan", err: String(err) });
     throw err;
   }
 }
@@ -143,7 +144,7 @@ export async function getContext(
   try {
     return await redis.get<ContextEntry>(keys.context(roomId, contextId));
   } catch (err) {
-    process.stderr.write(`[redis] getContext error: ${String(err)}\n`);
+    log.error({ msg: "redis.getContext", err: String(err) });
     throw err;
   }
 }
@@ -159,7 +160,7 @@ export async function setContext(
     });
     await redis.sadd(keys.contextIndex(roomId), entry.id);
   } catch (err) {
-    process.stderr.write(`[redis] setContext error: ${String(err)}\n`);
+    log.error({ msg: "redis.setContext", err: String(err) });
     throw err;
   }
 }
@@ -169,7 +170,7 @@ export async function getContextIndex(roomId: string): Promise<string[]> {
   try {
     return await redis.smembers(keys.contextIndex(roomId));
   } catch (err) {
-    process.stderr.write(`[redis] getContextIndex error: ${String(err)}\n`);
+    log.error({ msg: "redis.getContextIndex", err: String(err) });
     throw err;
   }
 }
@@ -186,7 +187,7 @@ export async function deleteContextEntry(
     await redis.srem(keys.contextIndex(roomId), contextId);
     return true;
   } catch (err) {
-    process.stderr.write(`[redis] deleteContextEntry error: ${String(err)}\n`);
+    log.error({ msg: "redis.deleteContextEntry", err: String(err) });
     throw err;
   }
 }
@@ -216,7 +217,7 @@ export async function deleteEventById(
     }
     return true;
   } catch (err) {
-    process.stderr.write(`[redis] deleteEventById error: ${String(err)}\n`);
+    log.error({ msg: "redis.deleteEventById", err: String(err) });
     throw err;
   }
 }
@@ -231,7 +232,7 @@ export async function pushEvent(roomId: string, event: Event): Promise<void> {
     await redis.lpush(keys.events(roomId), JSON.stringify(event));
     await redis.expire(keys.events(roomId), ROOM_TTL_SECONDS);
   } catch (err) {
-    process.stderr.write(`[redis] pushEvent error: ${String(err)}\n`);
+    log.error({ msg: "redis.pushEvent", err: String(err) });
     throw err;
   }
 }
@@ -250,7 +251,7 @@ export async function getEvents(
       typeof r === "string" ? (JSON.parse(r) as Event) : (r as Event),
     );
   } catch (err) {
-    process.stderr.write(`[redis] getEvents error: ${String(err)}\n`);
+    log.error({ msg: "redis.getEvents", err: String(err) });
     throw err;
   }
 }
@@ -264,7 +265,7 @@ export async function getEventCount(roomId: string): Promise<number> {
   try {
     return await redis.llen(keys.events(roomId));
   } catch (err) {
-    process.stderr.write(`[redis] getEventCount error: ${String(err)}\n`);
+    log.error({ msg: "redis.getEventCount", err: String(err) });
     return 0;
   }
 }
@@ -274,7 +275,7 @@ export async function getRoomOwner(roomId: string): Promise<string | null> {
   try {
     return await redis.get<string>(keys.roomOwner(roomId));
   } catch (err) {
-    process.stderr.write(`[redis] getRoomOwner error: ${String(err)}\n`);
+    log.error({ msg: "redis.getRoomOwner", err: String(err) });
     return null;
   }
 }
@@ -284,7 +285,7 @@ export async function getAgents(roomId: string): Promise<string[]> {
   try {
     return await redis.smembers(keys.agents(roomId));
   } catch (err) {
-    process.stderr.write(`[redis] getAgents error: ${String(err)}\n`);
+    log.error({ msg: "redis.getAgents", err: String(err) });
     throw err;
   }
 }
@@ -297,7 +298,7 @@ export async function registerAgent(
   try {
     await redis.sadd(keys.agents(roomId), agentId);
   } catch (err) {
-    process.stderr.write(`[redis] registerAgent error: ${String(err)}\n`);
+    log.error({ msg: "redis.registerAgent", err: String(err) });
     throw err;
   }
 }
@@ -310,7 +311,7 @@ export async function unregisterAgent(
   try {
     await redis.srem(keys.agents(roomId), agentId);
   } catch (err) {
-    process.stderr.write(`[redis] unregisterAgent error: ${String(err)}\n`);
+    log.error({ msg: "redis.unregisterAgent", err: String(err) });
     throw err;
   }
 }
@@ -323,7 +324,7 @@ export async function clearHeartbeat(
   try {
     await redis.del(keys.heartbeat(roomId, agentId));
   } catch (err) {
-    process.stderr.write(`[redis] clearHeartbeat error: ${String(err)}\n`);
+    log.error({ msg: "redis.clearHeartbeat", err: String(err) });
     throw err;
   }
 }
@@ -342,7 +343,7 @@ export async function setSharedVar(
     await redis.hset(keys.vars(roomId), { [key]: value });
     await redis.expire(keys.vars(roomId), ROOM_TTL_SECONDS);
   } catch (err) {
-    process.stderr.write(`[redis] setSharedVar error: ${String(err)}\n`);
+    log.error({ msg: "redis.setSharedVar", err: String(err) });
     throw err;
   }
 }
@@ -356,7 +357,7 @@ export async function getSharedVar(
     const value = await redis.hget<string>(keys.vars(roomId), key);
     return value ?? null;
   } catch (err) {
-    process.stderr.write(`[redis] getSharedVar error: ${String(err)}\n`);
+    log.error({ msg: "redis.getSharedVar", err: String(err) });
     throw err;
   }
 }
@@ -369,7 +370,7 @@ export async function listSharedVars(
     const all = await redis.hgetall<Record<string, string>>(keys.vars(roomId));
     return all ?? {};
   } catch (err) {
-    process.stderr.write(`[redis] listSharedVars error: ${String(err)}\n`);
+    log.error({ msg: "redis.listSharedVars", err: String(err) });
     throw err;
   }
 }
@@ -402,7 +403,7 @@ export async function acquireLock(
     }
     return false;
   } catch (err) {
-    process.stderr.write(`[redis] acquireLock error: ${String(err)}\n`);
+    log.error({ msg: "redis.acquireLock", err: String(err) });
     throw err;
   }
 }
@@ -425,7 +426,7 @@ export async function releaseLock(
     }
     return false;
   } catch (err) {
-    process.stderr.write(`[redis] releaseLock error: ${String(err)}\n`);
+    log.error({ msg: "redis.releaseLock", err: String(err) });
     throw err;
   }
 }
@@ -447,7 +448,7 @@ export async function listActiveLocks(
     }
     return active;
   } catch (err) {
-    process.stderr.write(`[redis] listActiveLocks error: ${String(err)}\n`);
+    log.error({ msg: "redis.listActiveLocks", err: String(err) });
     throw err;
   }
 }
@@ -464,7 +465,7 @@ export async function setHeartbeat(roomId: string, agentId: string): Promise<voi
     });
     await redis.sadd(keys.agents(roomId), agentId);
   } catch (err) {
-    process.stderr.write(`[redis] setHeartbeat error: ${String(err)}\n`);
+    log.error({ msg: "redis.setHeartbeat", err: String(err) });
     throw err;
   }
 }
@@ -484,7 +485,7 @@ export async function getAgentPresence(roomId: string): Promise<AgentPresence[]>
     }
     return presence;
   } catch (err) {
-    process.stderr.write(`[redis] getAgentPresence error: ${String(err)}\n`);
+    log.error({ msg: "redis.getAgentPresence", err: String(err) });
     throw err;
   }
 }
@@ -501,7 +502,7 @@ export async function getEventCursor(
   try {
     return await redis.get<string>(keys.cursor(roomId, agentId));
   } catch (err) {
-    process.stderr.write(`[redis] getEventCursor error: ${String(err)}\n`);
+    log.error({ msg: "redis.getEventCursor", err: String(err) });
     throw err;
   }
 }
@@ -515,7 +516,7 @@ export async function setEventCursor(
   try {
     await redis.set(keys.cursor(roomId, agentId), timestamp, { ex: ROOM_TTL_SECONDS });
   } catch (err) {
-    process.stderr.write(`[redis] setEventCursor error: ${String(err)}\n`);
+    log.error({ msg: "redis.setEventCursor", err: String(err) });
     throw err;
   }
 }
@@ -534,7 +535,7 @@ export async function markEventRead(
     await redis.sadd(keys.eventReads(roomId, eventId), agentId);
     await redis.expire(keys.eventReads(roomId, eventId), ROOM_TTL_SECONDS);
   } catch (err) {
-    process.stderr.write(`[redis] markEventRead error: ${String(err)}\n`);
+    log.error({ msg: "redis.markEventRead", err: String(err) });
     throw err;
   }
 }
@@ -547,7 +548,7 @@ export async function getEventReaders(
   try {
     return await redis.smembers(keys.eventReads(roomId, eventId));
   } catch (err) {
-    process.stderr.write(`[redis] getEventReaders error: ${String(err)}\n`);
+    log.error({ msg: "redis.getEventReaders", err: String(err) });
     throw err;
   }
 }
@@ -601,7 +602,7 @@ export async function assertRoomAccess(roomId: string, keyCtx: KeyContext): Prom
     await touchRoomTtl(roomId);
   } catch (err) {
     if (err instanceof Error && err.message === ROOM_ACCESS_DENIED) throw err;
-    process.stderr.write(`[redis] assertRoomAccess error: ${String(err)}\n`);
+    log.error({ msg: "redis.assertRoomAccess", err: String(err) });
     throw err;
   }
 }
@@ -614,7 +615,7 @@ export async function setReview(roomId: string, review: StoredReview): Promise<v
     await redis.sadd(keys.reviewsIndex(roomId), review.id);
     await redis.expire(keys.reviewsIndex(roomId), ROOM_TTL_SECONDS);
   } catch (err) {
-    process.stderr.write(`[redis] setReview error: ${String(err)}\n`);
+    log.error({ msg: "redis.setReview", err: String(err) });
     throw err;
   }
 }
@@ -628,7 +629,7 @@ export async function getReview(
     if (!raw) return null;
     return typeof raw === "string" ? (JSON.parse(raw) as StoredReview) : raw;
   } catch (err) {
-    process.stderr.write(`[redis] getReview error: ${String(err)}\n`);
+    log.error({ msg: "redis.getReview", err: String(err) });
     throw err;
   }
 }
@@ -638,7 +639,7 @@ export async function deleteReview(roomId: string, reviewId: string): Promise<vo
     await redis.del(keys.review(roomId, reviewId));
     await redis.srem(keys.reviewsIndex(roomId), reviewId);
   } catch (err) {
-    process.stderr.write(`[redis] deleteReview error: ${String(err)}\n`);
+    log.error({ msg: "redis.deleteReview", err: String(err) });
     throw err;
   }
 }
@@ -653,7 +654,7 @@ export async function listReviews(roomId: string): Promise<StoredReview[]> {
     }
     return out.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   } catch (err) {
-    process.stderr.write(`[redis] listReviews error: ${String(err)}\n`);
+    log.error({ msg: "redis.listReviews", err: String(err) });
     return [];
   }
 }
@@ -677,7 +678,7 @@ export async function listTeamRooms(teamId: string): Promise<string[]> {
     }
     return owned.sort();
   } catch (err) {
-    process.stderr.write(`[redis] listTeamRooms error: ${String(err)}\n`);
+    log.error({ msg: "redis.listTeamRooms", err: String(err) });
     return [];
   }
 }
@@ -702,7 +703,7 @@ export async function checkRateLimit(
     const remaining = Math.max(0, limitPerMinute - count);
     return { allowed: count <= limitPerMinute, remaining };
   } catch (err) {
-    process.stderr.write(`[redis] checkRateLimit error: ${String(err)}\n`);
+    log.error({ msg: "redis.checkRateLimit", err: String(err) });
     // Fail open. Do not block requests if Redis is down.
     return { allowed: true, remaining: limitPerMinute };
   }
@@ -747,7 +748,7 @@ export async function storeDynamicKey(
     await redis.sadd(keys.dynKeysByTeam(teamId), keyId);
     return { ...data, secret };
   } catch (err) {
-    process.stderr.write(`[redis] storeDynamicKey error: ${String(err)}\n`);
+    log.error({ msg: "redis.storeDynamicKey", err: String(err) });
     throw err;
   }
 }
@@ -757,7 +758,7 @@ export async function getDynamicKey(secret: string): Promise<DynKey | null> {
   try {
     return await redis.get<DynKey>(keys.dynKey(hashSecret(secret)));
   } catch (err) {
-    process.stderr.write(`[redis] getDynamicKey error: ${String(err)}\n`);
+    log.error({ msg: "redis.getDynamicKey", err: String(err) });
     return null; // auth lookup, fail closed for this key rather than throwing
   }
 }
@@ -780,7 +781,7 @@ export async function listDynamicKeys(
     }
     return result;
   } catch (err) {
-    process.stderr.write(`[redis] listDynamicKeys error: ${String(err)}\n`);
+    log.error({ msg: "redis.listDynamicKeys", err: String(err) });
     throw err;
   }
 }
@@ -804,7 +805,7 @@ export async function revokeDynamicKey(
     await redis.srem(keys.dynKeysByTeam(raw.teamId), keyId);
     return true;
   } catch (err) {
-    process.stderr.write(`[redis] revokeDynamicKey error: ${String(err)}\n`);
+    log.error({ msg: "redis.revokeDynamicKey", err: String(err) });
     throw err;
   }
 }
@@ -854,7 +855,7 @@ export async function storeInviteToken(
 
     return { ...data, token };
   } catch (err) {
-    process.stderr.write(`[redis] storeInviteToken error: ${String(err)}\n`);
+    log.error({ msg: "redis.storeInviteToken", err: String(err) });
     throw err;
   }
 }
@@ -864,7 +865,7 @@ export async function getInviteToken(token: string): Promise<InviteData | null> 
   try {
     return await redis.get<InviteData>(keys.invite(hashSecret(token)));
   } catch (err) {
-    process.stderr.write(`[redis] getInviteToken error: ${String(err)}\n`);
+    log.error({ msg: "redis.getInviteToken", err: String(err) });
     return null;
   }
 }
@@ -894,7 +895,7 @@ export async function listRoomInvites(
     }
     return result;
   } catch (err) {
-    process.stderr.write(`[redis] listRoomInvites error: ${String(err)}\n`);
+    log.error({ msg: "redis.listRoomInvites", err: String(err) });
     throw err;
   }
 }
@@ -909,7 +910,7 @@ export async function revokeInviteToken(tokenId: string, roomId: string): Promis
     await redis.srem(keys.invitesByRoom(roomId), tokenId);
     return true;
   } catch (err) {
-    process.stderr.write(`[redis] revokeInviteToken error: ${String(err)}\n`);
+    log.error({ msg: "redis.revokeInviteToken", err: String(err) });
     throw err;
   }
 }
