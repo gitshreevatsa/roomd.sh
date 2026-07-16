@@ -11,6 +11,22 @@ Both packages share a version number.
 
 ---
 
+## [0.5.0] - 2026-07-16
+
+Agent quality-of-life tools for managing rooms, plans, and peer reviews.
+
+### Added
+
+- **`list_rooms` / `leave_room`.** Per-team room index (`team:{teamId}:rooms`);
+  leave drops presence and emits `agent_left`.
+- **`delete_task` / `delete_context` / `delete_event`.** Scoped single-item deletes
+  with matching events.
+- **`set_task_priority` / `add_dependency`.** Order and wire tasks after creation.
+- **`request_review` / `approve` / `reject` / `list_reviews`.** Lightweight review
+  records for task or context targets.
+
+---
+
 ## [0.4.0] - 2026-07-16
 
 Go-live product cut. roomd on Railway (`api.roomd.sh`), roomd-web on Vercel

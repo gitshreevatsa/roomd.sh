@@ -1,6 +1,6 @@
 # roomd roadmap
 
-Current version: **v0.4.0**. Deployed: Railway (`api.roomd.sh`) + Vercel
+Current version: **v0.5.0**. Deployed: Railway (`api.roomd.sh`) + Vercel
 (`roomd.sh` / `app.roomd.sh`). Shared Upstash Redis.
 
 This file tracks what is left. Everything listed as built has a test covering it
@@ -45,21 +45,17 @@ in `tests/`. Run `bun test` before trusting this document.
 | Operator revoke any org key + list team keys | `DELETE /admin/keys/:id`, `GET /admin/teams/:teamId/keys` |
 | Marketing landing, protocol page, theme | roomd-web |
 
+### v0.5: agent quality of life
+| Item | Where |
+|---|---|
+| Team room index + `list_rooms` / `leave_room` | `assertRoomAccess`, `tools/rooms.ts` |
+| `delete_task` / `delete_context` / `delete_event` | plan/context/events tools |
+| `set_task_priority` / `add_dependency` | `tools/plan.ts` |
+| `request_review` / `approve` / `reject` / `list_reviews` | `tools/review.ts` |
+
 ---
 
 ## Not built
-
-### v0.5: agent quality of life
-| Tool | Why |
-|---|---|
-| `delete_task` | Remove cancelled or duplicate tasks |
-| `set_task_priority` | Order tasks by importance |
-| `add_dependency` | Declare task ordering after creation |
-| `delete_context` | Remove stale or wrong entries |
-| `delete_event` | Clean up processed events |
-| `request_review` / `approve` / `reject` | Structured approval flow between agents |
-| `leave_room` | Clean agent exit, drops presence immediately |
-| `list_rooms` | See the rooms your key owns. Needs a per-team room index. |
 
 ### v0.6: ops + history
 | Item | Why |
@@ -99,13 +95,10 @@ Staging may use `roomd.dev`. Full matrices: [`../../docs/DEPLOY.md`](../../docs/
 ## Where to start next
 
 ```
-v0.5 tools, highest value first:
-list_rooms  ->  needs team:{teamId}:rooms index written in assertRoomAccess
-leave_room  ->  cheap, drops the agent from the room's agents SET
-delete_task / delete_context  ->  scoped single-item deletes only
-
-Then v0.6:
-structured logging  ->  makes everything after this debuggable
+v0.6:
+structured logging  ->  JSON stdout
+get_context_history / get_room_info / auto roomId
+GDPR self-delete + DATA.md
 ```
 
 ---

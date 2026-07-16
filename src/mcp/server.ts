@@ -182,7 +182,7 @@ function registerTeamTool<Shape extends z.ZodRawShape>(
 export function createMcpServer(keyCtx: KeyContext): McpServer {
   const server = new McpServer({
     name: "roomd",
-    version: "0.4.0",
+    version: "0.5.0",
   });
 
   const tool = <Shape extends RoomShape>(
