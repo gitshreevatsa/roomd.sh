@@ -67,6 +67,17 @@ export interface KeyContext {
   allowedRoomId?: string;
   /** True when this is an invite token (skips ownership claim). */
   isInvite: boolean;
-  /** True when resolved from a static API_KEYS env var (not a dynamic or invite key). */
+  /** True when resolved from a static API_KEYS / ROOMD_SECRET env var. */
   isStatic: boolean;
+  /**
+   * True only for operator secrets (OPERATOR_KEYS, or legacy sole ROOMD_SECRET).
+   * Operator may provision teams, read cross-room stats, and revoke any key.
+   * Per-team API_KEYS entries are never operators.
+   */
+  isOperator: boolean;
+  /**
+   * Bound agent identity for invite tokens. MCP injects this into agentId /
+   * from / author so clients cannot spoof another agent.
+   */
+  agentId?: string;
 }

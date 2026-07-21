@@ -11,7 +11,7 @@ beforeEach(() => {
   fakeRedis.now = () => Date.now();
 });
 
-const team: KeyContext = { teamId: "t1", isInvite: false, isStatic: true };
+const team: KeyContext = { teamId: "t1", isInvite: false, isStatic: true, isOperator: false };
 
 describe("delete_task / priority / dependency", () => {
   test("delete_task removes the task and emits task_deleted", async () => {

@@ -10,7 +10,7 @@ beforeEach(() => {
   fakeRedis.flush();
 });
 
-const team: KeyContext = { teamId: "t1", isInvite: false, isStatic: true };
+const team: KeyContext = { teamId: "t1", isInvite: false, isStatic: true, isOperator: false };
 
 describe("search", () => {
   test("finds tasks and context by substring", async () => {

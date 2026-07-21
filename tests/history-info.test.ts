@@ -9,7 +9,7 @@ beforeEach(() => {
   fakeRedis.flush();
 });
 
-const team: KeyContext = { teamId: "t1", isInvite: false, isStatic: true };
+const team: KeyContext = { teamId: "t1", isInvite: false, isStatic: true, isOperator: false };
 
 describe("get_context_history", () => {
   test("keeps prior versions when context is updated", async () => {

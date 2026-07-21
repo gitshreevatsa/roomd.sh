@@ -16,11 +16,14 @@ import {
 // ---------------------------------------------------------------------------
 
 export const postEventInput = z.object({
-  roomId: z.string(),
-  type: z.string(),
-  from: z.string(),
-  to: z.string(),
-  payload: z.record(z.unknown()),
+  roomId: z.string().min(1).max(128),
+  type: z.string().min(1).max(128),
+  from: z.string().min(1).max(128),
+  to: z.string().min(1).max(128),
+  payload: z.record(z.unknown()).refine(
+    (p) => JSON.stringify(p).length <= 64_000,
+    "payload exceeds 64KB",
+  ),
 });
 
 /** Creates a new Event in the given room, persists it, and returns it. */

@@ -4,6 +4,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { z } from "zod";
 import { assertRoomAccess } from "../store/redis.js";
 import type { KeyContext } from "../types.js";
+import { log } from "../log.js";
 import {
   readPlanInput,
   readPlan,
@@ -112,6 +113,19 @@ import {
  */
 type RoomShape = z.ZodRawShape & { roomId: z.ZodString };
 
+/** Force invite-bound identity onto agent attribution fields. */
+function bindInviteAgent<T extends Record<string, unknown>>(
+  parsed: T,
+  keyCtx: KeyContext,
+): T {
+  if (!keyCtx.isInvite || !keyCtx.agentId) return parsed;
+  const next = { ...parsed };
+  if ("agentId" in next) (next as Record<string, unknown>).agentId = keyCtx.agentId;
+  if ("from" in next) (next as Record<string, unknown>).from = keyCtx.agentId;
+  if ("author" in next) (next as Record<string, unknown>).author = keyCtx.agentId;
+  return next;
+}
+
 /**
  * Register one room-scoped tool.
  *
@@ -128,18 +142,36 @@ function registerRoomTool<Shape extends RoomShape>(
   handler: (input: z.infer<z.ZodObject<Shape>>) => Promise<unknown>,
 ): void {
   const callback = async (input: unknown): Promise<CallToolResult> => {
+    const started = Date.now();
     try {
-      const parsed = schema.parse(input);
-      // The RoomShape constraint guarantees roomId, but TypeScript cannot
-      // narrow it through the generic shape, so assert it here.
-      const { roomId } = parsed as z.infer<z.ZodObject<Shape>> & { roomId: string };
+      const parsed = bindInviteAgent(
+        schema.parse(input) as Record<string, unknown>,
+        keyCtx,
+      ) as z.infer<z.ZodObject<Shape>> & { roomId: string };
+      const { roomId } = parsed;
       await assertRoomAccess(roomId, keyCtx);
       const result = await handler(parsed);
+      log.info({
+        msg: "mcp.tool",
+        tool: name,
+        teamId: keyCtx.teamId,
+        roomId,
+        ms: Date.now() - started,
+        ok: true,
+      });
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      log.warn({
+        msg: "mcp.tool",
+        tool: name,
+        teamId: keyCtx.teamId,
+        ms: Date.now() - started,
+        ok: false,
+        err: message,
+      });
       return {
         content: [{ type: "text", text: `Error: ${message}` }],
         isError: true,

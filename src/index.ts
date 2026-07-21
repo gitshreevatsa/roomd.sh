@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import { initSentry } from "./sentry.js";
 import { createMcpServer } from "./mcp/server.js";
 import { resolveKey, getKeyCount } from "./auth.js";
 import type { KeyContext } from "./types.js";
@@ -7,6 +8,7 @@ import { log } from "./log.js";
 import { nanoid } from "nanoid";
 import { addWebhook, listWebhooks, removeWebhook } from "./webhooks.js";
 import { registerSession } from "./notify.js";
+import { assertSafeWebhookUrl } from "./ssrf.js";
 import {
   getPlan,
   getContextIndex,
@@ -30,6 +32,8 @@ import {
 // App setup
 // ---------------------------------------------------------------------------
 
+initSentry();
+
 type Variables = { keyCtx: KeyContext };
 const app = new Hono<{ Variables: Variables }>();
 
@@ -44,6 +48,22 @@ if (getKeyCount() === 0) {
 }
 
 const RATE_LIMIT = parseInt(process.env["RATE_LIMIT_PER_MINUTE"] ?? "60", 10);
+const SSE_MAX_MS = parseInt(process.env["SSE_MAX_DURATION_MS"] ?? String(5 * 60_000), 10);
+const SSE_MAX_PER_TEAM = parseInt(process.env["SSE_MAX_PER_TEAM"] ?? "10", 10);
+const activeStreams = new Map<string, number>();
+
+function acquireStreamSlot(teamId: string): boolean {
+  const n = activeStreams.get(teamId) ?? 0;
+  if (n >= SSE_MAX_PER_TEAM) return false;
+  activeStreams.set(teamId, n + 1);
+  return true;
+}
+
+function releaseStreamSlot(teamId: string): void {
+  const n = activeStreams.get(teamId) ?? 0;
+  if (n <= 1) activeStreams.delete(teamId);
+  else activeStreams.set(teamId, n - 1);
+}
 
 // ---------------------------------------------------------------------------
 // Auth + rate-limit middleware
@@ -53,16 +73,19 @@ const RATE_LIMIT = parseInt(process.env["RATE_LIMIT_PER_MINUTE"] ?? "60", 10);
 const requireAuth = async (c: any, next: () => Promise<void>) => {
   const auth: string = c.req.header("Authorization") ?? "";
   if (!auth.startsWith("Bearer ")) {
+    log.warn({ msg: "auth.fail", reason: "missing_bearer", path: c.req.path });
     return c.json({ error: "Unauthorized" }, 401);
   }
 
   const keyCtx = await resolveKey(auth.slice(7));
   if (!keyCtx) {
+    log.warn({ msg: "auth.fail", reason: "unknown_key", path: c.req.path });
     return c.json({ error: "Unauthorized" }, 401);
   }
 
   const { allowed, remaining } = await checkRateLimit(keyCtx.teamId, RATE_LIMIT);
   if (!allowed) {
+    log.warn({ msg: "auth.rate_limit", teamId: keyCtx.teamId, path: c.req.path });
     return c.json(
       { error: "Rate limit exceeded" },
       429,
@@ -151,8 +174,13 @@ app.get("/rooms/:roomId/stream", requireAuth, async (c) => {
     return c.json({ error: "Failed to open stream" }, 500);
   }
 
+  if (!acquireStreamSlot(keyCtx.teamId)) {
+    return c.json({ error: "Too many concurrent streams for this team" }, 429);
+  }
+
   let since = c.req.query("since") ?? new Date(0).toISOString();
   const encoder = new TextEncoder();
+  const startedAt = Date.now();
   const stream = new ReadableStream({
     async start(controller) {
       const send = (chunk: string) => {
@@ -164,7 +192,6 @@ app.get("/rooms/:roomId/stream", requireAuth, async (c) => {
       };
       send(`: connected ${roomId}\n\n`);
       let alive = true;
-      // Prefer push from notifyRoomEvent when events land; poll as fallback.
       const unregister = registerSession(roomId, async (payload) => {
         const data = payload as { params?: { data?: { event?: unknown } } };
         const event = data.params?.data?.event;
@@ -176,11 +203,17 @@ app.get("/rooms/:roomId/stream", requireAuth, async (c) => {
           }
         }
       });
-      c.req.raw.signal.addEventListener("abort", () => {
+      const cleanup = () => {
         alive = false;
         unregister();
-      });
+        releaseStreamSlot(keyCtx.teamId);
+      };
+      c.req.raw.signal.addEventListener("abort", cleanup);
       while (alive) {
+        if (Date.now() - startedAt > SSE_MAX_MS) {
+          send(`: timeout\n\n`);
+          break;
+        }
         try {
           const events = await getEvents(roomId, 50);
           const fresh = events
@@ -196,8 +229,15 @@ app.get("/rooms/:roomId/stream", requireAuth, async (c) => {
         }
         await new Promise((r) => setTimeout(r, 1000));
       }
-      unregister();
-      controller.close();
+      cleanup();
+      try {
+        controller.close();
+      } catch {
+        /* already closed */
+      }
+    },
+    cancel() {
+      releaseStreamSlot(keyCtx.teamId);
     },
   });
 
@@ -271,13 +311,13 @@ app.get("/admin/rooms", requireAuth, requireTeamKey, async (c) => {
 /**
  * GET /admin/rooms/:roomId/stats
  * Cross-tenant usage stats for one room, for the operator's analytics view.
- * Only static operator keys may call this; it deliberately skips the room
+ * Only operator keys may call this; it deliberately skips the room
  * ownership check so the operator can see usage across every team.
  */
 app.get("/admin/rooms/:roomId/stats", requireAuth, requireTeamKey, async (c) => {
   const keyCtx = c.get("keyCtx") as KeyContext;
-  if (!keyCtx.isStatic) {
-    return c.json({ error: "Only static operator keys may read cross-room stats" }, 403);
+  if (!keyCtx.isOperator) {
+    return c.json({ error: "Only operator keys may read cross-room stats" }, 403);
   }
   const roomId = c.req.param("roomId");
   try {
@@ -309,15 +349,15 @@ app.get("/admin/rooms/:roomId/stats", requireAuth, requireTeamKey, async (c) => 
 /**
  * POST /admin/keys/provision
  * Mint a key for a new, caller-specified teamId.
- * Only static env keys may call this. Dynamic keys cannot bootstrap new teams.
+ * Only operator keys may call this. Dynamic / team keys cannot bootstrap new teams.
  * Used by roomd-web to give each new OAuth user an isolated team.
  * Body: { teamId: string }
  */
 app.post("/admin/keys/provision", requireAuth, requireTeamKey, async (c) => {
   const keyCtx = c.get("keyCtx") as KeyContext;
 
-  if (!keyCtx.isStatic) {
-    return c.json({ error: "Only static env keys may provision new teams" }, 403);
+  if (!keyCtx.isOperator) {
+    return c.json({ error: "Only operator keys may provision new teams" }, 403);
   }
 
   const body = await c.req.json().catch(() => ({})) as { teamId?: string; note?: string };
@@ -385,8 +425,8 @@ app.get("/admin/keys", requireAuth, requireTeamKey, async (c) => {
  */
 app.get("/admin/teams/:teamId/keys", requireAuth, requireTeamKey, async (c) => {
   const keyCtx = c.get("keyCtx") as KeyContext;
-  if (!keyCtx.isStatic) {
-    return c.json({ error: "Only static operator keys may list another team's keys" }, 403);
+  if (!keyCtx.isOperator) {
+    return c.json({ error: "Only operator keys may list another team's keys" }, 403);
   }
   const teamId = c.req.param("teamId");
   try {
@@ -408,7 +448,7 @@ app.delete("/admin/keys/:keyId", requireAuth, requireTeamKey, async (c) => {
   const keyId = c.req.param("keyId");
   try {
     // Static operator keys may revoke any org key; teams may only revoke their own.
-    const ok = await revokeDynamicKey(keyId, keyCtx.teamId, keyCtx.isStatic);
+    const ok = await revokeDynamicKey(keyId, keyCtx.teamId, keyCtx.isOperator);
     if (!ok) return c.json({ error: "Key not found or not owned by your team" }, 404);
     return c.json({ ok: true, keyId });
   } catch (err) {
@@ -518,14 +558,33 @@ app.post("/admin/webhooks", requireAuth, requireTeamKey, async (c) => {
     secret?: string;
     roomId?: string;
   };
-  if (!body.url || !/^https:\/\//i.test(body.url)) {
-    return c.json({ error: "url must be an https URL" }, 400);
+  if (!body.url) {
+    return c.json({ error: "url required" }, 400);
+  }
+  try {
+    await assertSafeWebhookUrl(body.url);
+  } catch (err) {
+    return c.json(
+      { error: err instanceof Error ? err.message : "Invalid webhook URL" },
+      400,
+    );
+  }
+  if (body.roomId) {
+    try {
+      await assertRoomAccess(body.roomId, keyCtx);
+    } catch (err) {
+      if (err instanceof Error && err.message === ROOM_ACCESS_DENIED) {
+        return c.json({ error: ROOM_ACCESS_DENIED }, 403);
+      }
+      return c.json({ error: "Failed to verify room" }, 500);
+    }
   }
   const hook = await addWebhook(keyCtx.teamId, {
     url: body.url,
     secret: body.secret && body.secret.length >= 8 ? body.secret : nanoid(24),
     roomId: body.roomId,
   });
+  log.info({ msg: "webhook.create", teamId: keyCtx.teamId, webhookId: hook.id });
   return c.json(
     {
       id: hook.id,

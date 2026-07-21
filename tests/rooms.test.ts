@@ -9,7 +9,7 @@ beforeEach(() => {
   fakeRedis.now = () => Date.now();
 });
 
-const teamA: KeyContext = { teamId: "team-a", isInvite: false, isStatic: true };
+const teamA: KeyContext = { teamId: "team-a", isInvite: false, isStatic: true, isOperator: false };
 
 describe("listRooms", () => {
   test("returns rooms claimed by the team", async () => {
@@ -25,6 +25,7 @@ describe("listRooms", () => {
       allowedRoomId: "alpha",
       isInvite: true,
       isStatic: false,
+      isOperator: false,
     };
     await assertRoomAccess("alpha", teamA);
     const { rooms } = await listRooms({}, invite);

@@ -106,12 +106,15 @@ export function validatePayload(
 // ---------------------------------------------------------------------------
 
 export const writeContextInput = z.object({
-  roomId: z.string(),
+  roomId: z.string().min(1).max(128),
   type: contextTypeEnum,
-  summary: z.string(),
-  consuming_agents: z.array(z.string()),
-  payload: z.record(z.unknown()),
-  author: z.string(),
+  summary: z.string().max(4000),
+  consuming_agents: z.array(z.string().max(128)).max(50),
+  payload: z.record(z.unknown()).refine(
+    (p) => JSON.stringify(p).length <= 64_000,
+    "payload exceeds 64KB",
+  ),
+  author: z.string().min(1).max(128),
 });
 
 /**
@@ -322,6 +325,12 @@ export async function deleteContext(
     throw new Error(`ContextEntry not found: ${input.id}`);
   }
   await deleteContextEntry(input.roomId, input.id);
+  try {
+    const { deleteContextVector } = await import("../../vector.js");
+    await deleteContextVector(input.roomId, input.id);
+  } catch {
+    /* optional */
+  }
   const now = new Date().toISOString();
   await pushEvent(input.roomId, {
     id: nanoid(),

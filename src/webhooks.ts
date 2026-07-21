@@ -2,6 +2,7 @@ import { createHmac, randomBytes } from "node:crypto";
 import { Redis } from "@upstash/redis";
 import type { Event } from "./types.js";
 import { log } from "./log.js";
+import { assertSafeWebhookUrl } from "./ssrf.js";
 
 const redis = new Redis({
   url: process.env["UPSTASH_REDIS_REST_URL"] ?? "",
@@ -59,6 +60,8 @@ function cryptoRandomId(): string {
   return randomBytes(8).toString("hex");
 }
 
+const WEBHOOK_TIMEOUT_MS = 10_000;
+
 /** Fire-and-forget HTTPS POSTs; never throws to callers. */
 export async function dispatchWebhooks(
   teamId: string,
@@ -70,6 +73,16 @@ export async function dispatchWebhooks(
     const targets = hooks.filter((h) => !h.roomId || h.roomId === roomId);
     await Promise.all(
       targets.map(async (h) => {
+        try {
+          await assertSafeWebhookUrl(h.url);
+        } catch (err) {
+          log.warn({
+            msg: "webhook.ssrf_block",
+            webhookId: h.id,
+            err: String(err),
+          });
+          return;
+        }
         const body = JSON.stringify({ roomId, event });
         const sig = createHmac("sha256", h.secret).update(body).digest("hex");
         try {
@@ -80,12 +93,14 @@ export async function dispatchWebhooks(
               "X-Roomd-Signature": sig,
             },
             body,
+            redirect: "error",
+            signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
           });
           if (!res.ok) {
-            log.warn({ msg: "webhook.http", status: res.status, url: h.url });
+            log.warn({ msg: "webhook.http", status: res.status, webhookId: h.id });
           }
         } catch (err) {
-          log.warn({ msg: "webhook.fail", url: h.url, err: String(err) });
+          log.warn({ msg: "webhook.fail", webhookId: h.id, err: String(err) });
         }
       }),
     );

@@ -35,53 +35,87 @@ afterEach(() => {
 });
 
 describe("resolveKey: static env keys", () => {
-  test("resolves a key from API_KEYS to its team", async () => {
-    setEnv({ API_KEYS: "team-a:secret-a,team-b:secret-b", ROOMD_SECRET: undefined });
+  test("resolves a key from API_KEYS to its team (not operator when multiple)", async () => {
+    setEnv({
+      API_KEYS: "team-a:secret-a,team-b:secret-b",
+      ROOMD_SECRET: undefined,
+      OPERATOR_KEYS: undefined,
+    });
 
     expect(await resolveKey("secret-a")).toEqual({
       teamId: "team-a",
       isInvite: false,
       isStatic: true,
+      isOperator: false,
     });
     expect(await resolveKey("secret-b")).toEqual({
       teamId: "team-b",
       isInvite: false,
       isStatic: true,
+      isOperator: false,
     });
   });
 
+  test("sole API_KEYS entry is treated as operator (single-tenant)", async () => {
+    setEnv({ API_KEYS: "team-a:secret-a", ROOMD_SECRET: undefined, OPERATOR_KEYS: undefined });
+    expect(await resolveKey("secret-a")).toEqual({
+      teamId: "team-a",
+      isInvite: false,
+      isStatic: true,
+      isOperator: true,
+    });
+  });
+
+  test("OPERATOR_KEYS marks only the operator secret", async () => {
+    setEnv({
+      API_KEYS: "team-a:secret-a,team-b:secret-b",
+      OPERATOR_KEYS: "operator:master-secret",
+      ROOMD_SECRET: undefined,
+    });
+    expect(await resolveKey("master-secret")).toEqual({
+      teamId: "operator",
+      isInvite: false,
+      isStatic: true,
+      isOperator: true,
+    });
+    expect((await resolveKey("secret-a"))?.isOperator).toBe(false);
+  });
+
   test("rejects an unknown secret", async () => {
-    setEnv({ API_KEYS: "team-a:secret-a", ROOMD_SECRET: undefined });
+    setEnv({ API_KEYS: "team-a:secret-a", ROOMD_SECRET: undefined, OPERATOR_KEYS: undefined });
     expect(await resolveKey("wrong")).toBeNull();
   });
 
   test("rejects an empty secret", async () => {
-    setEnv({ API_KEYS: "team-a:secret-a", ROOMD_SECRET: undefined });
+    setEnv({ API_KEYS: "team-a:secret-a", ROOMD_SECRET: undefined, OPERATOR_KEYS: undefined });
     expect(await resolveKey("")).toBeNull();
   });
 
   test("a prefix of a valid secret is not accepted", async () => {
-    setEnv({ API_KEYS: "team-a:secret-a", ROOMD_SECRET: undefined });
+    setEnv({ API_KEYS: "team-a:secret-a", ROOMD_SECRET: undefined, OPERATOR_KEYS: undefined });
     expect(await resolveKey("secret-")).toBeNull();
   });
 
-  test("falls back to ROOMD_SECRET as the default team", async () => {
-    setEnv({ API_KEYS: undefined, ROOMD_SECRET: "legacy" });
+  test("falls back to ROOMD_SECRET as the default team operator", async () => {
+    setEnv({ API_KEYS: undefined, OPERATOR_KEYS: undefined, ROOMD_SECRET: "legacy" });
     expect(await resolveKey("legacy")).toEqual({
       teamId: "default",
       isInvite: false,
       isStatic: true,
+      isOperator: true,
     });
   });
 
   test("reports zero configured keys when the env is empty", () => {
-    setEnv({ API_KEYS: undefined, ROOMD_SECRET: undefined });
+    setEnv({ API_KEYS: undefined, ROOMD_SECRET: undefined, OPERATOR_KEYS: undefined });
     expect(getKeyCount()).toBe(0);
   });
 });
 
 describe("dynamic keys", () => {
-  beforeEach(() => setEnv({ API_KEYS: "team-a:secret-a", ROOMD_SECRET: undefined }));
+  beforeEach(() =>
+    setEnv({ API_KEYS: "team-a:secret-a", ROOMD_SECRET: undefined, OPERATOR_KEYS: undefined }),
+  );
 
   test("a minted key resolves to its team and is not static", async () => {
     const { secret } = await storeDynamicKey("team-x", "team-a");
@@ -89,6 +123,7 @@ describe("dynamic keys", () => {
       teamId: "team-x",
       isInvite: false,
       isStatic: false,
+      isOperator: false,
     });
   });
 
@@ -125,15 +160,19 @@ describe("dynamic keys", () => {
 });
 
 describe("invite tokens", () => {
-  beforeEach(() => setEnv({ API_KEYS: "team-a:secret-a", ROOMD_SECRET: undefined }));
+  beforeEach(() =>
+    setEnv({ API_KEYS: "team-a:secret-a", ROOMD_SECRET: undefined, OPERATOR_KEYS: undefined }),
+  );
 
-  test("resolves to a room-scoped context", async () => {
-    const { token } = await storeInviteToken("room-1", "team-a");
+  test("resolves to a room-scoped context with bound agentId", async () => {
+    const { token, tokenId } = await storeInviteToken("room-1", "team-a");
     expect(await resolveKey(token)).toEqual({
       teamId: "team-a",
       allowedRoomId: "room-1",
       isInvite: true,
       isStatic: false,
+      isOperator: false,
+      agentId: `invite:${tokenId}`,
     });
   });
 
@@ -175,12 +214,22 @@ describe("invite tokens", () => {
 });
 
 describe("assertRoomAccess", () => {
-  const teamA: KeyContext = { teamId: "team-a", isInvite: false, isStatic: true };
-  const teamB: KeyContext = { teamId: "team-b", isInvite: false, isStatic: true };
+  const teamA: KeyContext = {
+    teamId: "team-a",
+    isInvite: false,
+    isStatic: true,
+    isOperator: false,
+  };
+  const teamB: KeyContext = {
+    teamId: "team-b",
+    isInvite: false,
+    isStatic: true,
+    isOperator: false,
+  };
 
   test("the first team to touch a room claims it", async () => {
     await assertRoomAccess("room-1", teamA);
-    await assertRoomAccess("room-1", teamA); // still fine on re-entry
+    await assertRoomAccess("room-1", teamA);
   });
 
   test("a second team is denied", async () => {
@@ -190,44 +239,69 @@ describe("assertRoomAccess", () => {
 
   test("the denial does not distinguish a missing room from someone else's", async () => {
     await assertRoomAccess("room-1", teamA);
-
     const denied = await assertRoomAccess("room-1", teamB).catch((e: Error) => e.message);
     expect(denied).toBe(ROOM_ACCESS_DENIED);
   });
 
-  test("an invite token may enter only its own room", async () => {
+  test("an invite token may enter only its own room when the issuer still owns it", async () => {
+    await assertRoomAccess("room-1", teamA);
     const invite: KeyContext = {
       teamId: "team-a",
       allowedRoomId: "room-1",
       isInvite: true,
       isStatic: false,
+      isOperator: false,
     };
-
     await assertRoomAccess("room-1", invite);
     await expect(assertRoomAccess("room-2", invite)).rejects.toThrow(ROOM_ACCESS_DENIED);
   });
 
-  test("an invite does not claim ownership of an unclaimed room", async () => {
+  test("an invite is denied when the room has no owner", async () => {
     const invite: KeyContext = {
       teamId: "team-a",
       allowedRoomId: "room-9",
       isInvite: true,
       isStatic: false,
+      isOperator: false,
     };
-    await assertRoomAccess("room-9", invite);
-
-    // team-b can still claim it, because the invite never took ownership.
-    await assertRoomAccess("room-9", teamB);
+    await expect(assertRoomAccess("room-9", invite)).rejects.toThrow(ROOM_ACCESS_DENIED);
   });
 
-  test("an idle room's ownership eventually expires", async () => {
+  test("an invite dies when another team reclaims the room", async () => {
     await assertRoomAccess("room-1", teamA);
+    const invite: KeyContext = {
+      teamId: "team-a",
+      allowedRoomId: "room-1",
+      isInvite: true,
+      isStatic: false,
+      isOperator: false,
+    };
+    await assertRoomAccess("room-1", invite);
 
-    // Rooms are reclaimed after 30 days without a tool call.
     const later = Date.now() + 31 * 24 * 60 * 60 * 1000;
     fakeRedis.now = () => later;
+    await assertRoomAccess("room-1", teamB);
+    await expect(assertRoomAccess("room-1", invite)).rejects.toThrow(ROOM_ACCESS_DENIED);
+  });
 
-    await assertRoomAccess("room-1", teamB); // now claimable by anyone
+  test("reclaim purges leftover context from the previous tenant", async () => {
+    const { setContext, getContext } = await import("../src/store/redis");
+    await assertRoomAccess("room-1", teamA);
+    await setContext("room-1", {
+      id: "c1",
+      type: "note",
+      author: "a",
+      timestamp: new Date().toISOString(),
+      summary: "secret leftover",
+      consuming_agents: [],
+      payload: {},
+      version: "1",
+    });
+
+    const later = Date.now() + 31 * 24 * 60 * 60 * 1000;
+    fakeRedis.now = () => later;
+    await assertRoomAccess("room-1", teamB);
+    expect(await getContext("room-1", "c1")).toBeNull();
   });
 
   test("claiming a room indexes it under the team for list_rooms", async () => {
@@ -235,7 +309,6 @@ describe("assertRoomAccess", () => {
     await assertRoomAccess("room-a", teamA);
     await assertRoomAccess("room-b", teamA);
     await assertRoomAccess("room-c", teamB);
-
     expect(await listTeamRooms("team-a")).toEqual(["room-a", "room-b"]);
     expect(await listTeamRooms("team-b")).toEqual(["room-c"]);
   });
@@ -243,10 +316,8 @@ describe("assertRoomAccess", () => {
   test("listTeamRooms drops rooms whose ownership expired", async () => {
     const { listTeamRooms } = await import("../src/store/redis");
     await assertRoomAccess("room-1", teamA);
-
     const later = Date.now() + 31 * 24 * 60 * 60 * 1000;
     fakeRedis.now = () => later;
-
     expect(await listTeamRooms("team-a")).toEqual([]);
   });
 });

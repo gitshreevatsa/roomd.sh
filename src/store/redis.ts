@@ -112,10 +112,94 @@ export async function touchRoomTtl(roomId: string): Promise<void> {
     pipeline.expire(keys.vars(roomId), ROOM_TTL_SECONDS);
     pipeline.expire(keys.locksIndex(roomId), ROOM_TTL_SECONDS);
     pipeline.expire(keys.roomOwner(roomId), ROOM_TTL_SECONDS);
+    pipeline.expire(keys.roomMeta(roomId), ROOM_TTL_SECONDS);
+    pipeline.expire(keys.reviewsIndex(roomId), ROOM_TTL_SECONDS);
+    pipeline.expire(keys.invitesByRoom(roomId), ROOM_TTL_SECONDS);
     await pipeline.exec();
+
+    // Refresh per-entry keys that sit outside the index TTL.
+    const [contextIds, reviewIds, agents, lockResources] = await Promise.all([
+      redis.smembers(keys.contextIndex(roomId)),
+      redis.smembers(keys.reviewsIndex(roomId)),
+      redis.smembers(keys.agents(roomId)),
+      redis.smembers(keys.locksIndex(roomId)),
+    ]);
+    const follow = redis.pipeline();
+    for (const id of contextIds) {
+      follow.expire(keys.context(roomId, id), ROOM_TTL_SECONDS);
+      follow.expire(keys.contextHistory(roomId, id), ROOM_TTL_SECONDS);
+    }
+    for (const id of reviewIds) {
+      follow.expire(keys.review(roomId, id), ROOM_TTL_SECONDS);
+    }
+    for (const agentId of agents) {
+      follow.expire(keys.cursor(roomId, agentId), ROOM_TTL_SECONDS);
+    }
+    for (const resource of lockResources) {
+      follow.expire(keys.lock(roomId, resource), ROOM_TTL_SECONDS);
+    }
+    await follow.exec();
   } catch (err) {
     // TTL refresh is best effort. A failure here must not fail the tool call.
     log.error({ msg: "redis.touchRoomTtl", err: String(err) });
+  }
+}
+
+/**
+ * Delete leftover room data before a new team claims an expired room.
+ * Prevents cross-tenant leakage of context, events, reviews, etc.
+ */
+export async function purgeRoomContents(roomId: string): Promise<void> {
+  try {
+    const [contextIds, reviewIds, agents, lockResources, inviteIds] =
+      await Promise.all([
+        redis.smembers(keys.contextIndex(roomId)),
+        redis.smembers(keys.reviewsIndex(roomId)),
+        redis.smembers(keys.agents(roomId)),
+        redis.smembers(keys.locksIndex(roomId)),
+        redis.smembers(keys.invitesByRoom(roomId)),
+      ]);
+
+    const toDelete: string[] = [
+      keys.plan(roomId),
+      keys.events(roomId),
+      keys.contextIndex(roomId),
+      keys.agents(roomId),
+      keys.vars(roomId),
+      keys.locksIndex(roomId),
+      keys.reviewsIndex(roomId),
+      keys.roomMeta(roomId),
+      keys.invitesByRoom(roomId),
+    ];
+
+    for (const id of contextIds) {
+      toDelete.push(keys.context(roomId, id), keys.contextHistory(roomId, id));
+    }
+    for (const id of reviewIds) {
+      toDelete.push(keys.review(roomId, id));
+    }
+    for (const agentId of agents) {
+      toDelete.push(
+        keys.heartbeat(roomId, agentId),
+        keys.cursor(roomId, agentId),
+      );
+    }
+    for (const resource of lockResources) {
+      toDelete.push(keys.lock(roomId, resource));
+    }
+    for (const tokenId of inviteIds) {
+      const stored = await redis.get<{ tokenHash?: string }>(keys.inviteById(tokenId));
+      if (stored?.tokenHash) toDelete.push(keys.invite(stored.tokenHash));
+      toDelete.push(keys.inviteById(tokenId));
+    }
+
+    if (toDelete.length > 0) {
+      await redis.del(...toDelete);
+    }
+    log.info({ msg: "redis.purgeRoom", roomId, keys: toDelete.length });
+  } catch (err) {
+    log.error({ msg: "redis.purgeRoom", err: String(err) });
+    throw err;
   }
 }
 
@@ -656,9 +740,13 @@ export const ROOM_ACCESS_DENIED = "Room not found or access denied";
  */
 export async function assertRoomAccess(roomId: string, keyCtx: KeyContext): Promise<void> {
   try {
-    // Invite tokens: scope is baked into the token itself
+    // Invite tokens: must match room AND current owner must still be the issuer.
     if (keyCtx.isInvite) {
       if (keyCtx.allowedRoomId !== roomId) {
+        throw new Error(ROOM_ACCESS_DENIED);
+      }
+      const owner = await redis.get<string>(keys.roomOwner(roomId));
+      if (!owner || owner !== keyCtx.teamId) {
         throw new Error(ROOM_ACCESS_DENIED);
       }
       await touchRoomTtl(roomId);
@@ -676,7 +764,20 @@ export async function assertRoomAccess(roomId: string, keyCtx: KeyContext): Prom
       nx: true,
       ex: ROOM_TTL_SECONDS,
     });
-    if (claimed !== "OK") {
+    if (claimed === "OK") {
+      // New claim — purge any leftover data from a previous tenant.
+      const leftover = await redis.exists(
+        keys.plan(roomId),
+        keys.events(roomId),
+        keys.contextIndex(roomId),
+        keys.roomMeta(roomId),
+      );
+      if (leftover > 0) {
+        await purgeRoomContents(roomId);
+        // Re-set owner after purge (purge does not touch roomOwner).
+        await redis.set(ownerKey, keyCtx.teamId, { ex: ROOM_TTL_SECONDS });
+      }
+    } else {
       const owner = await redis.get<string>(ownerKey);
       if (owner !== keyCtx.teamId) {
         throw new Error(ROOM_ACCESS_DENIED);
@@ -924,20 +1025,27 @@ export async function storeInviteToken(
   expiresInSeconds?: number,
 ): Promise<InviteData & { token: string }> {
   try {
+    const MAX_INVITE_TTL = 60 * 60 * 24 * 90; // 90 days
+    const DEFAULT_INVITE_TTL = 60 * 60 * 24 * 7; // 7 days
+    let ttl =
+      typeof expiresInSeconds === "number" && Number.isFinite(expiresInSeconds)
+        ? Math.floor(expiresInSeconds)
+        : DEFAULT_INVITE_TTL;
+    if (ttl < 60) ttl = 60;
+    if (ttl > MAX_INVITE_TTL) ttl = MAX_INVITE_TTL;
+
     const tokenId = nanoid(10);
     const token = nanoid(32);
     const tokenHash = hashSecret(token);
     const createdAt = new Date().toISOString();
-    const expiresAt = expiresInSeconds
-      ? new Date(Date.now() + expiresInSeconds * 1000).toISOString()
-      : null;
+    const expiresAt = new Date(Date.now() + ttl * 1000).toISOString();
     const data: InviteData = { tokenId, roomId, createdBy, createdAt, expiresAt };
     const stored: StoredInvite = { ...data, tokenHash, hint: hint(token) };
 
-    const setOpts = expiresInSeconds ? { ex: expiresInSeconds } : {};
-    await redis.set(keys.invite(tokenHash), JSON.stringify(data), setOpts);
-    await redis.set(keys.inviteById(tokenId), JSON.stringify(stored));
+    await redis.set(keys.invite(tokenHash), JSON.stringify(data), { ex: ttl });
+    await redis.set(keys.inviteById(tokenId), JSON.stringify(stored), { ex: ttl });
     await redis.sadd(keys.invitesByRoom(roomId), tokenId);
+    await redis.expire(keys.invitesByRoom(roomId), Math.max(ttl, ROOM_TTL_SECONDS));
 
     return { ...data, token };
   } catch (err) {

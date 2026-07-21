@@ -51,6 +51,10 @@ export async function semanticSearch(
   }
   const url = process.env["UPSTASH_VECTOR_REST_URL"]!;
   const token = process.env["UPSTASH_VECTOR_REST_TOKEN"]!;
+  // Sanitize roomId for filter expression (alphanumeric, hyphen, underscore).
+  const safeRoomId = roomId.replace(/[^a-zA-Z0-9_-]/g, "");
+  if (!safeRoomId) throw new Error("Invalid roomId for semantic search");
+
   const res = await fetch(`${url}/query`, {
     method: "POST",
     headers: {
@@ -61,20 +65,47 @@ export async function semanticSearch(
       data: q,
       topK: limit,
       includeMetadata: true,
-      filter: `roomId = '${roomId.replace(/'/g, "")}'`,
+      filter: `roomId = '${safeRoomId}'`,
     }),
   });
   if (!res.ok) {
     throw new Error(`Vector query failed: ${res.status}`);
   }
   const data = (await res.json()) as {
-    result?: Array<{ id: string; score: number; metadata?: { contextId?: string } }>;
+    result?: Array<{
+      id: string;
+      score: number;
+      metadata?: { contextId?: string; roomId?: string };
+    }>;
   };
-  const hits: SearchHit[] = (data.result ?? []).map((r) => ({
-    kind: "context" as const,
-    id: r.metadata?.contextId ?? String(r.id).split(":").pop() ?? String(r.id),
-    score: r.score,
-    snippet: `semantic match (${r.score.toFixed(3)})`,
-  }));
+  const hits: SearchHit[] = (data.result ?? [])
+    .filter((r) => !r.metadata?.roomId || r.metadata.roomId === roomId)
+    .map((r) => ({
+      kind: "context" as const,
+      id: r.metadata?.contextId ?? String(r.id).split(":").pop() ?? String(r.id),
+      score: r.score,
+      snippet: `semantic match (${r.score.toFixed(3)})`,
+    }));
   return { q, hits };
+}
+
+export async function deleteContextVector(
+  roomId: string,
+  contextId: string,
+): Promise<void> {
+  if (!configured()) return;
+  try {
+    const url = process.env["UPSTASH_VECTOR_REST_URL"]!;
+    const token = process.env["UPSTASH_VECTOR_REST_TOKEN"]!;
+    await fetch(`${url}/delete`, {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ ids: [`${roomId}:${contextId}`] }),
+    });
+  } catch (err) {
+    log.warn({ msg: "vector.delete", err: String(err) });
+  }
 }
