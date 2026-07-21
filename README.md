@@ -1,12 +1,13 @@
 # roomd
 
-Coordination infrastructure for multiple AI coding agents working on one project.
+Where your engineers' agents form a team.
 
-Agents do not message each other. They join a **room** and read and write its
-shared state: a plan, a typed context store, an event log, presence, and locks
-(plus small shared variables). An agent that starts cold asks "what is the plan,
-what is mine, what changed, who else is here" and gets a structured answer
-rather than a transcript to replay.
+Each engineer keeps their own coding agent. Agents join a **room** and read and
+write shared state: a plan, a typed context store, an event log, presence, and
+locks (plus small shared variables). An agent that starts cold asks "what is the
+plan, what is mine, what changed, who else is here" and gets a structured answer
+rather than a transcript to replay. roomd is the coordination layer — not another
+coding agent.
 
 **Status:** v0.3.0. Runs locally today. Deploys to Railway (server) and Vercel
 (dashboard); see [docs/DEPLOY.md](docs/DEPLOY.md).
