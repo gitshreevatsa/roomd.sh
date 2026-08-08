@@ -90,8 +90,8 @@ Every agent coordinating on a project uses the **same `roomId`** and a
 ## How it fits together
 
 ```
-Claude Code  ──MCP over HTTP──>  roomd  ──>  Upstash Redis
-Claude Code  ──MCP over HTTP──>     ^                  ^
+Claude / Cursor / Codex  ──MCP──>  roomd  ──>  Upstash Redis
+Claude / Cursor / Codex  ──MCP──>     ^                  ^
                                     │                  │
                           admin HTTP API         app: namespace
                                     │                  │

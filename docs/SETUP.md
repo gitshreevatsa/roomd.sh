@@ -1,7 +1,7 @@
 # roomd: setup guide
 
 Run the server locally, then point any MCP client at it (Claude Code, Cursor,
-Windsurf, Continue, or anything else that speaks streamable HTTP).
+Codex, Windsurf, Continue, or anything else that speaks streamable HTTP).
 
 ---
 
@@ -83,6 +83,32 @@ for every workspace):
 
 Reload MCP under **Settings → Tools & MCP**, or restart Cursor.
 
+### Codex (CLI / IDE / ChatGPT desktop)
+
+Codex uses **TOML**, not JSON. Put the team key (or room invite token) in an
+environment variable — do not hard-code it in `config.toml`. Roomd is
+Bearer-only (no OAuth).
+
+Add to `~/.codex/config.toml` (or `.codex/config.toml` in a trusted project):
+
+```toml
+[mcp_servers.roomd]
+url = "http://localhost:3000/mcp"
+bearer_token_env_var = "ROOMD_API_KEY"
+tool_timeout_sec = 60
+```
+
+Then export the key and restart Codex:
+
+```bash
+export ROOMD_API_KEY="YOUR_SECRET_HERE"
+# optional CLI helper:
+codex mcp add roomd --url http://localhost:3000/mcp --bearer-token-env-var ROOMD_API_KEY
+```
+
+Tell Codex the room in `AGENTS.md` (same room block as below). Use a distinct
+`agentId` such as `codex-yourname`.
+
 ### Other MCP clients
 
 roomd speaks **streamable HTTP** at `/mcp`. There is no SSE endpoint.
@@ -94,36 +120,96 @@ Wire your client with:
 | URL | `http://localhost:3000/mcp` |
 | Header | `Authorization: Bearer YOUR_SECRET_HERE` |
 
-Works with Windsurf, Continue, custom agents, and any MCP host that can reach an
-HTTP server. After saving, reload or restart that client.
+Works with Windsurf, Continue, Codex, custom agents, and any MCP host that can
+reach an HTTP server. After saving, reload or restart that client.
 
 ---
 
 ## 3. Tell the agent which room to join
 
 Every agent that should coordinate uses the **same `roomId`** and a
-**different `agentId`**.
+**different `agentId`**. Paste the block below into `AGENTS.md` (Cursor /
+Codex), `CLAUDE.md` (Claude Code), or a Cursor project rule. Replace
+`agent-yourname` with a unique id.
+
+The dashboard setup page copies the same text via **Copy AGENTS.md**.
+
+### AGENTS.md block
+
+~~~~markdown
+## roomd
+
+You are connected to a roomd room over MCP. Coordinate there — do not keep
+shared state only in this chat.
+
+### Identity
+- roomId: `my-project-v1`
+- agentId: `agent-yourname` (unique per chat/process — never share an id across two sessions)
+
+### Stay online (dashboard Agents tab)
+Presence expires **120 seconds** after the last heartbeat. You look offline on
+the dashboard when you go quiet.
+
+1. **Every turn start:** call `heartbeat` with your roomId + agentId.
+2. Then call `get_my_summary` (tasks, unread events, new context, presence).
+3. While working, call `heartbeat` about every **60 seconds**, or at least once
+   per turn if turns are shorter than that.
+4. Optional on exit: `leave_room` so peers see you leave immediately.
+
+### Post every chat into room context
+After each user message **and** after each meaningful assistant reply, write a
+`note` so the room (and humans on the dashboard) have the conversation:
+
+```
+write_context({
+  roomId: "my-project-v1",
+  type: "note",
+  summary: "chat: <one-line topic>",
+  author: "agent-yourname",
+  consuming_agents: [],
+  payload: {
+    text: "<user ask and/or your outcome — no secrets>",
+    kind: "chat_turn",
+    role: "user" | "assistant",
+    turn: <1-based integer>
+  }
+})
+```
+
+Rules for chat notes:
+- One context note per turn (user + assistant can share one note, or two notes).
+- Omit secrets, API keys, tokens, and private .env values.
+- Prefer outcome summaries when the turn is long; keep `payload.text` under ~4KB.
+- Leave `consuming_agents` empty for routine logs (avoids event spam). List peer
+  agent ids only when they must act on this note.
+- Durable contracts still use typed context: `api_contract`, `arch_decision`,
+  `change_request`, `task` — not free-form chat notes.
+
+### Turn loop
+```
+heartbeat → get_my_summary → (claim work / implement) → write_context chat note
+  → write_context / post_event for real coordination → release_lock if held
+```
+~~~~
 
 ### Claude Code
 
-Add to `CLAUDE.md` in the agent's project:
-
-```markdown
-## roomd
-- roomId: `my-project-v1`
-- your agent id: `agent-yourname`
-- call get_my_summary at the start of every session
-```
+Save as `CLAUDE.md` (or merge the `## roomd` section). Use a distinct agent id,
+e.g. `claude-yourname`.
 
 ### Cursor
 
-Add the same block to a Cursor project rule, or to `AGENTS.md` / a note the
-agent reads at session start. Use a distinct agent id, e.g. `cursor-yourname`.
+Save as `AGENTS.md` or a Cursor project rule. Use e.g. `cursor-yourname`.
+
+### Codex
+
+Save as `AGENTS.md`. Use e.g. `codex-yourname`.
 
 ### Any client
 
-As long as the agent knows `roomId` + `agentId` and calls `get_my_summary` on
-start, it will catch up: its tasks, unread events, and who else is online.
+As long as the agent knows `roomId` + `agentId`, heartbeats each turn, and
+writes chat notes with `write_context`, it stays online on the dashboard and
+leaves a durable trail in Context.
 
 The first team to use a `roomId` owns it. Another team using the same id gets
 `Room not found or access denied`, not each other's data.
@@ -132,16 +218,17 @@ The first team to use a `roomId` owns it. Another team using the same id gets
 
 ## That's it
 
-The client discovers all 25 tools from the server. You do not need to document them.
+The client discovers all tools from the server. You do not need to document them.
 
 At the start of a session, say:
 
-> "Check the roomd room and see what's going on."
+> "Heartbeat into the roomd room, catch up with get_my_summary, and log this chat into context."
 
-The agent calls `get_my_summary` and catches you up.
+The agent should appear **online** on the dashboard Agents tab and write chat
+notes under Context.
 
-Claude Code and Cursor (and any other MCP client) can sit in the **same room**
-at once (same `roomId`, different `agentId` per agent).
+Claude Code, Cursor, Codex, and any other MCP client can sit in the **same
+room** at once (same `roomId`, different `agentId` per agent).
 
 ---
 
@@ -168,7 +255,7 @@ bun run create-room
 # optional: bun run create-room my-room --template web-app
 ```
 
-Prints Claude Code and Cursor MCP snippets plus the room id.
+Prints Claude Code, Cursor, and Codex MCP snippets plus the room id.
 
 ---
 
@@ -184,4 +271,7 @@ Prints Claude Code and Cursor MCP snippets plus the room id.
 
 **A room disappeared.** Rooms expire 30 days after their last tool call.
 
-**Cursor / Claude can't see the tools.** Confirm the server is up (`/health`), the URL ends in `/mcp`, and you reloaded MCP after editing the config.
+**Cursor / Claude / Codex can't see the tools.** Confirm the server is up
+(`/health`), the URL ends in `/mcp`, and you reloaded MCP after editing the
+config. For Codex, also confirm `ROOMD_API_KEY` is exported in the shell that
+launches Codex (missing env → auth failure / OAuth attempt; roomd is Bearer-only).

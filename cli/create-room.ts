@@ -6,6 +6,15 @@
  *   ROOMD_URL=https://api.roomd.sh ROOMD_API_KEY=... bun cli/create-room.ts [roomId] [--template web-app]
  */
 
+import {
+  formatAgentsMd,
+  formatClaudeSnippet,
+  formatCodexExport,
+  formatCodexSnippet,
+  formatCursorSnippet,
+  mcpEndpoint,
+} from "./snippets";
+
 const url = (process.env["ROOMD_URL"] ?? "http://localhost:3010").replace(/\/$/, "");
 const key = process.env["ROOMD_API_KEY"] ?? process.env["ROOMD_MASTER_KEY"];
 
@@ -86,41 +95,22 @@ async function main() {
     createdRoomId = data.roomId;
   }
 
-  const mcpUrl = `${url}/mcp`;
+  const mcpUrl = mcpEndpoint(url);
   console.log(`Room: ${createdRoomId}`);
   console.log("");
   console.log("Claude Code (.claude/settings.json snippet):");
-  console.log(
-    JSON.stringify(
-      {
-        mcpServers: {
-          roomd: {
-            type: "http",
-            url: mcpUrl,
-            headers: { Authorization: `Bearer ${key}` },
-          },
-        },
-      },
-      null,
-      2,
-    ),
-  );
+  console.log(formatClaudeSnippet(mcpUrl, key));
   console.log("");
   console.log("Cursor (mcp.json snippet):");
-  console.log(
-    JSON.stringify(
-      {
-        mcpServers: {
-          roomd: {
-            url: mcpUrl,
-            headers: { Authorization: `Bearer ${key}` },
-          },
-        },
-      },
-      null,
-      2,
-    ),
-  );
+  console.log(formatCursorSnippet(mcpUrl, key));
+  console.log("");
+  console.log("Codex (~/.codex/config.toml snippet):");
+  console.log(formatCodexSnippet(mcpUrl));
+  console.log("");
+  console.log(formatCodexExport(key));
+  console.log("");
+  console.log("AGENTS.md / CLAUDE.md:");
+  console.log(formatAgentsMd(createdRoomId ?? "your-room"));
   console.log("");
   console.log(`Tell your agent: room id is ${createdRoomId}`);
 }

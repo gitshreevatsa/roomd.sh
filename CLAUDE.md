@@ -13,9 +13,9 @@ Version tracks the package (`package.json`). Deploy notes: `../docs/DEPLOY.md`.
 ## Connecting an agent to this server
 
 Start the server (see `docs/SETUP.md`), then point your MCP client at it.
-Claude Code, Cursor, and other HTTP MCP clients all work with the same URL and
-Bearer key; only the config file differs. Snippets: `docs/SETUP.md` and the
-dashboard setup guide.
+Claude Code, Cursor, Codex, and other HTTP MCP clients all work with the same
+URL and Bearer key; only the config file differs. Snippets: `docs/SETUP.md` and
+the dashboard setup guide.
 
 ### Claude Code
 
@@ -52,6 +52,22 @@ Add the following to `.cursor/mcp.json`:
 }
 ```
 
+### Codex
+
+Codex uses TOML + an env-var bearer (do not hard-code the secret). Add to
+`~/.codex/config.toml`:
+
+```toml
+[mcp_servers.roomd]
+url = "http://localhost:3000/mcp"
+bearer_token_env_var = "ROOMD_API_KEY"
+tool_timeout_sec = 60
+```
+
+```bash
+export ROOMD_API_KEY="YOUR_ROOMD_SECRET"
+```
+
 Replace `YOUR_ROOMD_SECRET` with a secret from `API_KEYS` (or `ROOMD_SECRET`) on the server.
 
 The transport is streamable HTTP at `/mcp`. There is no SSE endpoint.
@@ -63,8 +79,9 @@ The transport is streamable HTTP at `/mcp`. There is no SSE endpoint.
 Every agent connecting to roomd MUST follow these rules.
 
 ### Session start
-1. Call `get_my_summary` with your `roomId` and `agentId`. One call returns your tasks, your unread events, how much new context exists, and who else is online.
+1. Call `heartbeat`, then `get_my_summary` with your `roomId` and `agentId`. One call returns your tasks, your unread events, how much new context exists, and who else is online (`get_my_summary` also refreshes presence).
 2. Call `list_context` (optionally filtered by `type` or `author`) to load what you need before implementing anything.
+3. After each user message and each meaningful reply, `write_context` with `type: "note"` and `payload.kind: "chat_turn"` so the chat is stored in the room (see project `AGENTS.md`).
 
 ### Picking up work
 - Call `get_unblocked_tasks` to see what is safe to start. A task is unblocked when every id in its `depends_on` refers to a task that is `done`.
@@ -73,6 +90,7 @@ Every agent connecting to roomd MUST follow these rules.
 ### Context writing
 - Never write prose to the context store. Always use the structured `payload` fields.
 - The server validates `payload` against the schema for its `type` and rejects a write that does not match. The error names the offending field.
+- Chat turns: `write_context` with `type: "note"`, `payload.kind: "chat_turn"`, and `role` / `turn` fields (extra fields are allowed on notes).
 - When you complete an API design: `write_context` with `type: "api_contract"`.
 - When you make an architecture decision: `write_context` with `type: "arch_decision"`.
 - When a contract changes: `update_context`, not a second `write_context`. Writing a second entry leaves the stale one in place and consumers cannot tell which is current.
@@ -88,7 +106,8 @@ Every agent connecting to roomd MUST follow these rules.
 - Watch for `context_available` / `context_updated` (something you build against changed, or a `change_request` context entry targets you) and `task_blocked`.
 
 ### Staying visible
-- Call `heartbeat` every ~60 seconds. You are considered offline after 120 seconds of silence.
+- Call `heartbeat` at the start of every turn and about every ~60 seconds while active. You are considered offline after 120 seconds of silence.
+- Successful room tool calls that include `agentId` / `author` / `from` also refresh presence (except `leave_room`).
 
 ### Shared variables
 - `set_shared_var` is for small facts: a port, a staging URL, a migration name.

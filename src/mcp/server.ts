@@ -6,6 +6,7 @@ import {
   assertRoomAccess,
   checkRateLimit,
   rateLimitBucket,
+  setHeartbeat,
 } from "../store/redis.js";
 import type { KeyContext } from "../types.js";
 import { log } from "../log.js";
@@ -138,6 +139,20 @@ function bindBoundAgent<T extends Record<string, unknown>>(
 
 const REVIEW_RESOLVE_TOOLS = new Set(["approve", "reject"]);
 
+/** Refresh dashboard presence when a tool call names an agent. */
+function touchPresenceFromInput(
+  roomId: string,
+  input: Record<string, unknown>,
+): void {
+  const candidates = [input["agentId"], input["author"], input["from"]];
+  for (const c of candidates) {
+    if (typeof c === "string" && c.length > 0) {
+      void setHeartbeat(roomId, c);
+      return;
+    }
+  }
+}
+
 /**
  * Register one room-scoped tool.
  *
@@ -178,6 +193,11 @@ function registerRoomTool<Shape extends RoomShape>(
       const { roomId } = parsed;
       await assertRoomAccess(roomId, keyCtx);
       const result = await handler(parsed);
+      // Keep Agents tab green while the agent is actively using room tools.
+      // Skip leave_room so we do not revive presence after an intentional exit.
+      if (name !== "leave_room") {
+        touchPresenceFromInput(roomId, parsed as Record<string, unknown>);
+      }
       log.info({
         msg: "mcp.tool",
         tool: name,

@@ -11,6 +11,7 @@ import {
   getAgentPresence,
   getContextIndex,
   getContext,
+  setHeartbeat,
 } from "../../store/redis.js";
 import { consumeUnreadEvents } from "./events.js";
 
@@ -401,6 +402,10 @@ export async function getMySummary(
   input: z.infer<typeof getMySummaryInput>,
 ): Promise<MySummary> {
   const priorCursor = await getEventCursor(input.roomId, input.agentId);
+
+  // Session start should mark the agent online — presence is otherwise only
+  // refreshed by an explicit heartbeat (120s TTL).
+  await setHeartbeat(input.roomId, input.agentId);
 
   const [plan, unread, contextIds, presence] = await Promise.all([
     readPlan({ roomId: input.roomId }),

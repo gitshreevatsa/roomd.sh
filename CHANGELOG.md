@@ -9,6 +9,11 @@ Both packages share a version number.
 
 ## [Unreleased]
 
+### Added
+
+- **Codex MCP snippets.** `bun run create-room` and `docs/SETUP.md` now include
+  Codex TOML (`bearer_token_env_var = "ROOMD_API_KEY"`).
+
 ---
 
 ## [1.1.0] - 2026-07-16
