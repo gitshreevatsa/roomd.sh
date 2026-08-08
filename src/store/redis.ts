@@ -3,6 +3,16 @@ import { createHash } from "node:crypto";
 import { Redis } from "@upstash/redis";
 import type { AgentPresence, ContextEntry, Event, KeyContext, Plan } from "../types.js";
 import { log } from "../log.js";
+import {
+  INVITE_LIMIT_EXCEEDED,
+  KEY_LIMIT_EXCEEDED,
+  MAX_EVENTS_PER_ROOM,
+  MAX_INVITES_PER_ROOM,
+  MAX_KEYS_PER_TEAM,
+  MAX_ROOMS_PER_TEAM,
+  RATE_LIMIT_FAIL_OPEN,
+  ROOM_LIMIT_EXCEEDED,
+} from "../limits.js";
 
 const HEARTBEAT_TTL_SECONDS = 120;
 
@@ -352,28 +362,36 @@ export async function deleteContextEntry(
 }
 
 /**
- * Remove one event by id from the room log. Rebuilds the list (newest-first).
- * Returns false when the event is not found.
+ * Remove one event by id from the room log (newest-first).
+ * Builds a staging list then RENAME-swaps so a mid-rewrite failure does not
+ * leave the log empty.
  */
 export async function deleteEventById(
   roomId: string,
   eventId: string,
 ): Promise<boolean> {
   try {
-    const raw = await redis.lrange(keys.events(roomId), 0, -1);
+    const eventsKey = keys.events(roomId);
+    const raw = await redis.lrange(eventsKey, 0, -1);
     const events = raw.map((r) =>
       typeof r === "string" ? (JSON.parse(r) as Event) : (r as Event),
     );
     const kept = events.filter((e) => e.id !== eventId);
     if (kept.length === events.length) return false;
-    await redis.del(keys.events(roomId));
-    if (kept.length > 0) {
-      // LPUSH in reverse so the first element stays newest.
-      for (let i = kept.length - 1; i >= 0; i--) {
-        await redis.lpush(keys.events(roomId), JSON.stringify(kept[i]));
-      }
-      await redis.expire(keys.events(roomId), ROOM_TTL_SECONDS);
+
+    if (kept.length === 0) {
+      await redis.del(eventsKey);
+      return true;
     }
+
+    const staging = `${eventsKey}:rewrite:${nanoid(8)}`;
+    // LPUSH in reverse so index 0 stays newest.
+    for (let i = kept.length - 1; i >= 0; i--) {
+      await redis.lpush(staging, JSON.stringify(kept[i]));
+    }
+    await redis.expire(staging, ROOM_TTL_SECONDS);
+    await redis.rename(staging, eventsKey);
+    await redis.expire(eventsKey, ROOM_TTL_SECONDS);
     return true;
   } catch (err) {
     log.error({ msg: "redis.deleteEventById", err: String(err) });
@@ -388,11 +406,14 @@ export async function deleteEventById(
 /** Prepends an Event (as JSON) to the room's event list using LPUSH. */
 export async function pushEvent(roomId: string, event: Event): Promise<void> {
   try {
-    await redis.lpush(keys.events(roomId), JSON.stringify(event));
-    await redis.expire(keys.events(roomId), ROOM_TTL_SECONDS);
+    const eventsKey = keys.events(roomId);
+    await redis.lpush(eventsKey, JSON.stringify(event));
+    // Cap length: keep newest MAX_EVENTS_PER_ROOM entries.
+    await redis.ltrim(eventsKey, 0, MAX_EVENTS_PER_ROOM - 1);
+    await redis.expire(eventsKey, ROOM_TTL_SECONDS);
     // Fire webhooks + in-process SSE/MCP session notify without blocking.
     const owner = await redis.get<string>(keys.roomOwner(roomId));
-    if (owner) {
+    if (owner && !isQuarantineOwner(owner)) {
       void import("../webhooks.js").then(({ dispatchWebhooks }) =>
         dispatchWebhooks(owner, roomId, event),
       );
@@ -729,27 +750,67 @@ export async function getEventReaders(
 /** Thrown for both "no such room" and "wrong team", so callers cannot probe for existence. */
 export const ROOM_ACCESS_DENIED = "Room not found or access denied";
 
+const ROOM_ID_RE = /^[a-z0-9][a-z0-9_-]{1,63}$/;
+
+/** Validate roomId shape; rejects reserved `__` prefixes and uppercase. */
+export function assertValidRoomId(roomId: string): void {
+  if (typeof roomId !== "string" || !ROOM_ID_RE.test(roomId)) {
+    throw new Error(
+      "Invalid roomId: use 2–64 chars of [a-z0-9_-], starting with alphanumeric",
+    );
+  }
+  if (roomId.startsWith("__") || roomId.includes("__")) {
+    throw new Error("Invalid roomId: reserved prefix");
+  }
+}
+
+/** Owner values used while a reclaim purge is in progress. */
+export function quarantineOwner(teamId: string): string {
+  return `__purging__:${teamId}`;
+}
+
+export function isQuarantineOwner(owner: string | null | undefined): boolean {
+  return typeof owner === "string" && owner.startsWith("__purging__:");
+}
+
+/**
+ * Rate-limit bucket for a credential.
+ * Invite traffic uses a separate key so invitees do not burn the owner's budget.
+ */
+export function rateLimitBucket(keyCtx: KeyContext): string {
+  if (keyCtx.isInvite) {
+    const raw =
+      keyCtx.boundAgentId ??
+      keyCtx.agentId ??
+      (keyCtx.allowedRoomId ? `room:${keyCtx.allowedRoomId}` : "unknown");
+    const tokenPart = raw.startsWith("invite:") ? raw.slice("invite:".length) : raw;
+    return `invite:${tokenPart}`;
+  }
+  return keyCtx.teamId;
+}
+
 /**
  * Claim or verify room access for the resolved KeyContext.
  *
  * Invite tokens: allowed if their allowedRoomId matches, no ownership transfer.
- * Team keys: SET NX to claim on first access, verify on subsequent calls.
+ * Invitees do NOT refresh room TTL (cannot extend idle reclaim).
+ * Team keys: quarantine-claim → purge → set real owner on first access.
  * Cross-team access always throws ROOM_ACCESS_DENIED.
- *
- * Also refreshes the room's TTL, so any room in active use is never reclaimed.
  */
 export async function assertRoomAccess(roomId: string, keyCtx: KeyContext): Promise<void> {
   try {
+    assertValidRoomId(roomId);
+
     // Invite tokens: must match room AND current owner must still be the issuer.
     if (keyCtx.isInvite) {
       if (keyCtx.allowedRoomId !== roomId) {
         throw new Error(ROOM_ACCESS_DENIED);
       }
       const owner = await redis.get<string>(keys.roomOwner(roomId));
-      if (!owner || owner !== keyCtx.teamId) {
+      if (!owner || isQuarantineOwner(owner) || owner !== keyCtx.teamId) {
         throw new Error(ROOM_ACCESS_DENIED);
       }
-      await touchRoomTtl(roomId);
+      // Intentionally no touchRoomTtl — invitees must not extend idle reclaim.
       return;
     }
 
@@ -758,37 +819,68 @@ export async function assertRoomAccess(roomId: string, keyCtx: KeyContext): Prom
       throw new Error(ROOM_ACCESS_DENIED);
     }
 
-    // Normal team key: claim or verify ownership
     const ownerKey = keys.roomOwner(roomId);
-    const claimed = await redis.set(ownerKey, keyCtx.teamId, {
+    const existing = await redis.get<string>(ownerKey);
+
+    if (existing === keyCtx.teamId) {
+      await redis.sadd(keys.teamRooms(keyCtx.teamId), roomId);
+      await ensureRoomMeta(roomId, keyCtx.teamId);
+      await touchRoomTtl(roomId);
+      return;
+    }
+
+    if (existing && isQuarantineOwner(existing)) {
+      // Another (or same) reclaim in progress — deny until purge completes.
+      throw new Error(ROOM_ACCESS_DENIED);
+    }
+
+    if (existing && existing !== keyCtx.teamId) {
+      throw new Error(ROOM_ACCESS_DENIED);
+    }
+
+    // Unclaimed (expired or never owned): enforce room cap before claim.
+    const owned = await listTeamRooms(keyCtx.teamId);
+    if (owned.length >= MAX_ROOMS_PER_TEAM) {
+      throw new Error(ROOM_LIMIT_EXCEEDED);
+    }
+
+    const quarantine = quarantineOwner(keyCtx.teamId);
+    const claimed = await redis.set(ownerKey, quarantine, {
       nx: true,
       ex: ROOM_TTL_SECONDS,
     });
-    if (claimed === "OK") {
-      // New claim — purge any leftover data from a previous tenant.
-      const leftover = await redis.exists(
-        keys.plan(roomId),
-        keys.events(roomId),
-        keys.contextIndex(roomId),
-        keys.roomMeta(roomId),
-      );
-      if (leftover > 0) {
-        await purgeRoomContents(roomId);
-        // Re-set owner after purge (purge does not touch roomOwner).
-        await redis.set(ownerKey, keyCtx.teamId, { ex: ROOM_TTL_SECONDS });
-      }
-    } else {
+    if (claimed !== "OK") {
+      // Lost the race — re-read and verify.
       const owner = await redis.get<string>(ownerKey);
       if (owner !== keyCtx.teamId) {
         throw new Error(ROOM_ACCESS_DENIED);
       }
+      await redis.sadd(keys.teamRooms(keyCtx.teamId), roomId);
+      await ensureRoomMeta(roomId, keyCtx.teamId);
+      await touchRoomTtl(roomId);
+      return;
     }
-    // Keep a per-team index so list_rooms does not scan the whole keyspace.
+
+    // Quarantine held — purge leftovers, then install real owner (fail closed).
+    try {
+      await purgeRoomContents(roomId);
+      await redis.set(ownerKey, keyCtx.teamId, { ex: ROOM_TTL_SECONDS });
+    } catch (err) {
+      try {
+        await redis.del(ownerKey);
+      } catch (delErr) {
+        log.error({ msg: "redis.assertRoomAccess.rollback", err: String(delErr) });
+      }
+      throw err;
+    }
+
     await redis.sadd(keys.teamRooms(keyCtx.teamId), roomId);
     await ensureRoomMeta(roomId, keyCtx.teamId);
     await touchRoomTtl(roomId);
   } catch (err) {
     if (err instanceof Error && err.message === ROOM_ACCESS_DENIED) throw err;
+    if (err instanceof Error && err.message === ROOM_LIMIT_EXCEEDED) throw err;
+    if (err instanceof Error && err.message.startsWith("Invalid roomId")) throw err;
     log.error({ msg: "redis.assertRoomAccess", err: String(err) });
     throw err;
   }
@@ -870,29 +962,46 @@ export async function listTeamRooms(teamId: string): Promise<string[]> {
   }
 }
 
+/**
+ * Operator/self offboarding: purge every room owned by a team and drop ownership.
+ * Returns how many rooms were purged.
+ */
+export async function purgeTeamRooms(teamId: string): Promise<number> {
+  const rooms = await listTeamRooms(teamId);
+  for (const roomId of rooms) {
+    await purgeRoomContents(roomId);
+    await redis.del(keys.roomOwner(roomId));
+    await redis.srem(keys.teamRooms(teamId), roomId);
+  }
+  return rooms.length;
+}
+
 // ---------------------------------------------------------------------------
 // Rate limiting helpers
 // ---------------------------------------------------------------------------
 
 /**
- * Fixed-window rate limiter (per teamId, per minute).
- * Returns whether the request is allowed and how many remain this window.
+ * Fixed-window rate limiter (per bucket, per minute).
+ * `bucket` is usually a teamId, or `invite:…` for invite credentials.
+ * Fails closed on Redis errors unless RATE_LIMIT_FAIL_OPEN=true.
  */
 export async function checkRateLimit(
-  teamId: string,
+  bucket: string,
   limitPerMinute: number,
 ): Promise<{ allowed: boolean; remaining: number }> {
   try {
     const window = Math.floor(Date.now() / 60_000);
-    const key = keys.rateLimit(teamId, window);
+    const key = keys.rateLimit(bucket, window);
     const count = await redis.incr(key);
     if (count === 1) await redis.expire(key, 120); // clean up after 2 minutes
     const remaining = Math.max(0, limitPerMinute - count);
     return { allowed: count <= limitPerMinute, remaining };
   } catch (err) {
     log.error({ msg: "redis.checkRateLimit", err: String(err) });
-    // Fail open. Do not block requests if Redis is down.
-    return { allowed: true, remaining: limitPerMinute };
+    if (RATE_LIMIT_FAIL_OPEN) {
+      return { allowed: true, remaining: limitPerMinute };
+    }
+    return { allowed: false, remaining: 0 };
   }
 }
 
@@ -907,6 +1016,8 @@ export interface DynKey {
   createdAt: string;
   /** Optional human label, e.g. "Maya's laptop" or "CI test key". */
   note?: string;
+  /** When set, MCP binds agentId/from/author to this value. */
+  boundAgentId?: string;
 }
 
 /** What is persisted under dynkeyid:{keyId}. Never contains the raw secret. */
@@ -915,19 +1026,45 @@ interface StoredDynKey extends DynKey {
   hint: string;
 }
 
+export interface StoreDynamicKeyOptions {
+  note?: string;
+  boundAgentId?: string;
+}
+
 /** Create a new dynamic team key. Returns the raw secret, the only time it exists. */
 export async function storeDynamicKey(
   teamId: string,
   createdBy: string,
-  note?: string,
+  noteOrOpts?: string | StoreDynamicKeyOptions,
 ): Promise<DynKey & { secret: string }> {
   try {
+    const opts: StoreDynamicKeyOptions =
+      typeof noteOrOpts === "string" || noteOrOpts === undefined
+        ? { note: noteOrOpts }
+        : noteOrOpts;
+
+    const existing = await listDynamicKeys(teamId);
+    if (existing.length >= MAX_KEYS_PER_TEAM) {
+      throw new Error(KEY_LIMIT_EXCEEDED);
+    }
+
     const keyId = nanoid(10);
     const secret = nanoid(32);
     const secretHash = hashSecret(secret);
     const createdAt = new Date().toISOString();
-    const trimmedNote = note?.trim().slice(0, 120) || undefined;
-    const data: DynKey = { keyId, teamId, createdBy, createdAt, ...(trimmedNote ? { note: trimmedNote } : {}) };
+    const trimmedNote = opts.note?.trim().slice(0, 120) || undefined;
+    const trimmedBound = opts.boundAgentId?.trim().slice(0, 64) || undefined;
+    if (trimmedBound && !/^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,63}$/.test(trimmedBound)) {
+      throw new Error("boundAgentId must be 1–64 chars of [a-zA-Z0-9_.:-]");
+    }
+    const data: DynKey = {
+      keyId,
+      teamId,
+      createdBy,
+      createdAt,
+      ...(trimmedNote ? { note: trimmedNote } : {}),
+      ...(trimmedBound ? { boundAgentId: trimmedBound } : {}),
+    };
     const stored: StoredDynKey = { ...data, secretHash, hint: hint(secret) };
 
     await redis.set(keys.dynKey(secretHash), JSON.stringify(data));
@@ -935,6 +1072,7 @@ export async function storeDynamicKey(
     await redis.sadd(keys.dynKeysByTeam(teamId), keyId);
     return { ...data, secret };
   } catch (err) {
+    if (err instanceof Error && err.message === KEY_LIMIT_EXCEEDED) throw err;
     log.error({ msg: "redis.storeDynamicKey", err: String(err) });
     throw err;
   }
@@ -1025,6 +1163,12 @@ export async function storeInviteToken(
   expiresInSeconds?: number,
 ): Promise<InviteData & { token: string }> {
   try {
+    assertValidRoomId(roomId);
+    const active = await listRoomInvites(roomId);
+    if (active.length >= MAX_INVITES_PER_ROOM) {
+      throw new Error(INVITE_LIMIT_EXCEEDED);
+    }
+
     const MAX_INVITE_TTL = 60 * 60 * 24 * 90; // 90 days
     const DEFAULT_INVITE_TTL = 60 * 60 * 24 * 7; // 7 days
     let ttl =
@@ -1049,6 +1193,8 @@ export async function storeInviteToken(
 
     return { ...data, token };
   } catch (err) {
+    if (err instanceof Error && err.message === INVITE_LIMIT_EXCEEDED) throw err;
+    if (err instanceof Error && err.message.startsWith("Invalid roomId")) throw err;
     log.error({ msg: "redis.storeInviteToken", err: String(err) });
     throw err;
   }
@@ -1105,6 +1251,41 @@ export async function revokeInviteToken(tokenId: string, roomId: string): Promis
     return true;
   } catch (err) {
     log.error({ msg: "redis.revokeInviteToken", err: String(err) });
+    throw err;
+  }
+}
+
+/** Revoke every invite token for a room. Returns how many were revoked. */
+export async function revokeAllRoomInvites(roomId: string): Promise<number> {
+  try {
+    const tokenIds = await redis.smembers(keys.invitesByRoom(roomId));
+    let revoked = 0;
+    for (const tokenId of tokenIds) {
+      if (await revokeInviteToken(tokenId, roomId)) revoked += 1;
+    }
+    return revoked;
+  } catch (err) {
+    log.error({ msg: "redis.revokeAllRoomInvites", err: String(err) });
+    throw err;
+  }
+}
+
+/**
+ * Revoke every invite across all rooms owned by a team.
+ * Used by offboarding / disable-delete flows (via admin HTTP).
+ */
+export async function revokeAllTeamInvites(
+  teamId: string,
+): Promise<{ rooms: number; revoked: number }> {
+  try {
+    const roomIds = await listTeamRooms(teamId);
+    let revoked = 0;
+    for (const roomId of roomIds) {
+      revoked += await revokeAllRoomInvites(roomId);
+    }
+    return { rooms: roomIds.length, revoked };
+  } catch (err) {
+    log.error({ msg: "redis.revokeAllTeamInvites", err: String(err) });
     throw err;
   }
 }

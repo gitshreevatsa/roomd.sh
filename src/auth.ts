@@ -128,24 +128,28 @@ export async function resolveKey(secret: string): Promise<KeyContext | null> {
   // 3. Dynamic Redis team keys
   const dynKey = await getDynamicKey(secret);
   if (dynKey) {
+    const bound = dynKey.boundAgentId;
     return {
       teamId: dynKey.teamId,
       isInvite: false,
       isStatic: false,
       isOperator: false,
+      ...(bound ? { agentId: bound, boundAgentId: bound } : {}),
     };
   }
 
   // 4. Room-scoped invite tokens
   const invite = await getInviteToken(secret);
   if (invite) {
+    const bound = `invite:${invite.tokenId}`;
     return {
       teamId: invite.createdBy,
       allowedRoomId: invite.roomId,
       isInvite: true,
       isStatic: false,
       isOperator: false,
-      agentId: `invite:${invite.tokenId}`,
+      agentId: bound,
+      boundAgentId: bound,
     };
   }
 

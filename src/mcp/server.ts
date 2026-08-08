@@ -2,9 +2,14 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { z } from "zod";
-import { assertRoomAccess } from "../store/redis.js";
+import {
+  assertRoomAccess,
+  checkRateLimit,
+  rateLimitBucket,
+} from "../store/redis.js";
 import type { KeyContext } from "../types.js";
 import { log } from "../log.js";
+import { RATE_LIMIT_PER_MINUTE } from "../limits.js";
 import {
   readPlanInput,
   readPlan,
@@ -113,18 +118,25 @@ import {
  */
 type RoomShape = z.ZodRawShape & { roomId: z.ZodString };
 
-/** Force invite-bound identity onto agent attribution fields. */
-function bindInviteAgent<T extends Record<string, unknown>>(
+/**
+ * Force credential-bound identity onto agent attribution fields.
+ * Applies to invite tokens and dyn keys that carry boundAgentId.
+ */
+function bindBoundAgent<T extends Record<string, unknown>>(
   parsed: T,
   keyCtx: KeyContext,
 ): T {
-  if (!keyCtx.isInvite || !keyCtx.agentId) return parsed;
+  const bound = keyCtx.boundAgentId ?? (keyCtx.isInvite ? keyCtx.agentId : undefined);
+  if (!bound) return parsed;
   const next = { ...parsed };
-  if ("agentId" in next) (next as Record<string, unknown>).agentId = keyCtx.agentId;
-  if ("from" in next) (next as Record<string, unknown>).from = keyCtx.agentId;
-  if ("author" in next) (next as Record<string, unknown>).author = keyCtx.agentId;
+  if ("agentId" in next) (next as Record<string, unknown>).agentId = bound;
+  if ("from" in next) (next as Record<string, unknown>).from = bound;
+  if ("author" in next) (next as Record<string, unknown>).author = bound;
+  if ("requestedBy" in next) (next as Record<string, unknown>).requestedBy = bound;
   return next;
 }
+
+const REVIEW_RESOLVE_TOOLS = new Set(["approve", "reject"]);
 
 /**
  * Register one room-scoped tool.
@@ -144,10 +156,25 @@ function registerRoomTool<Shape extends RoomShape>(
   const callback = async (input: unknown): Promise<CallToolResult> => {
     const started = Date.now();
     try {
-      const parsed = bindInviteAgent(
+      const { allowed } = await checkRateLimit(
+        rateLimitBucket(keyCtx),
+        RATE_LIMIT_PER_MINUTE,
+      );
+      if (!allowed) {
+        throw new Error("Rate limit exceeded");
+      }
+
+      const parsed = bindBoundAgent(
         schema.parse(input) as Record<string, unknown>,
         keyCtx,
       ) as z.infer<z.ZodObject<Shape>> & { roomId: string };
+
+      if (REVIEW_RESOLVE_TOOLS.has(name) && !keyCtx.boundAgentId) {
+        throw new Error(
+          "approve/reject require a dyn or invite key with boundAgentId; static team keys cannot resolve reviews",
+        );
+      }
+
       const { roomId } = parsed;
       await assertRoomAccess(roomId, keyCtx);
       const result = await handler(parsed);
@@ -203,7 +230,17 @@ function registerTeamTool<Shape extends z.ZodRawShape>(
 ): void {
   const callback = async (input: unknown): Promise<CallToolResult> => {
     try {
-      const parsed = schema.parse(input);
+      const { allowed } = await checkRateLimit(
+        rateLimitBucket(keyCtx),
+        RATE_LIMIT_PER_MINUTE,
+      );
+      if (!allowed) {
+        throw new Error("Rate limit exceeded");
+      }
+      const parsed = bindBoundAgent(
+        schema.parse(input) as Record<string, unknown>,
+        keyCtx,
+      ) as z.infer<z.ZodObject<Shape>>;
       const result = await handler(parsed, keyCtx);
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],

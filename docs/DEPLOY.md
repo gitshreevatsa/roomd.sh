@@ -37,12 +37,20 @@ the `roomd/` subdirectory.
 3. Railway detects `roomd/Dockerfile` and `roomd/railway.json` (which sets the
    `/health` healthcheck).
 4. Add service variables:
-   - `API_KEYS` = `team-a:<long-random>,team-b:<long-random>` (one pair per team)
+   - `OPERATOR_KEYS` = `operator:<master-secret>` (for provisioning; roomd-web `ROOMD_MASTER_KEY`)
+   - `API_KEYS` = `team-a:<long-random>,…` (optional static team secrets; not operators)
    - `UPSTASH_REDIS_REST_URL`
    - `UPSTASH_REDIS_REST_TOKEN`
    - `RATE_LIMIT_PER_MINUTE` = `60` (optional)
+   - `RATE_LIMIT_FAIL_OPEN` = `false` (default: **fail closed** — Redis errors deny requests)
+   - Hard caps (optional; defaults shown): `MAX_ROOMS_PER_TEAM=50`, `MAX_KEYS_PER_TEAM=20`, `MAX_INVITES_PER_ROOM=20`, `MAX_WEBHOOKS_PER_TEAM=10`, `MAX_EVENTS_PER_ROOM=10000`, `MAX_RPC_BATCH=1`
+   - `WEBHOOK_SECRET_KEY` = long random (encrypts webhook signing secrets at rest; falls back to `ROOMD_SECRET`)
    - Do **not** set `PORT`; Railway provides it and the server reads it.
 5. Deploy. Add the custom domain `api.roomd.sh`.
+
+**Rate limiting:** Per-tool MCP calls and admin HTTP share fixed-window budgets. Invite credentials use a separate bucket (`invite:…`) so invitees do not burn the owner's quota. JSON-RPC batches larger than `MAX_RPC_BATCH` (default 1) are rejected with 400. If Redis is unreachable, the limiter **fails closed** unless you explicitly set `RATE_LIMIT_FAIL_OPEN=true` (availability over safety — not recommended in production).
+
+**Webhooks:** Outbound POSTs include `X-Roomd-Signature`, `X-Roomd-Timestamp`, and `X-Roomd-Nonce`. Signature is HMAC-SHA256 over `${timestamp}.${nonce}.${body}`. Receivers should reject timestamps older than ~5 minutes.
 
 Verify: `curl https://api.roomd.sh/health` returns `{"ok":true,...}`.
 
@@ -59,9 +67,8 @@ Verify: `curl https://api.roomd.sh/health` returns `{"ok":true,...}`.
    - `AUTH_MODE` = `apikey` (or `both` / `email` later)
    - `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` (same DB as roomd)
    - `ROOMD_URL` = `https://api.roomd.sh`
-   - `ROOMD_MASTER_KEY` = one **static** secret from the server's `API_KEYS`.
-     This is what provisions a new team for each new user, so it must be a
-     static env key, not a dynamic or invite key.
+   - `ROOMD_MASTER_KEY` = the operator secret from roomd's `OPERATOR_KEYS`
+     (not a per-team API_KEYS entry). Used to provision isolated teams.
    - OAuth vars only if `AUTH_MODE` is `email` or `both`.
 5. Deploy. Add the custom domain `app.roomd.sh`.
 

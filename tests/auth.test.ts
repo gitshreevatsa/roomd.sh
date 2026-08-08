@@ -127,6 +127,20 @@ describe("dynamic keys", () => {
     });
   });
 
+  test("a dyn key with boundAgentId surfaces it on resolve", async () => {
+    const { secret } = await storeDynamicKey("team-x", "team-a", {
+      boundAgentId: "backend-claude",
+    });
+    expect(await resolveKey(secret)).toEqual({
+      teamId: "team-x",
+      isInvite: false,
+      isStatic: false,
+      isOperator: false,
+      agentId: "backend-claude",
+      boundAgentId: "backend-claude",
+    });
+  });
+
   test("the raw secret is never written to Redis", async () => {
     const { secret } = await storeDynamicKey("team-x", "team-a");
     expect(fakeRedis.dump()).not.toContain(secret);
@@ -166,13 +180,15 @@ describe("invite tokens", () => {
 
   test("resolves to a room-scoped context with bound agentId", async () => {
     const { token, tokenId } = await storeInviteToken("room-1", "team-a");
+    const bound = `invite:${tokenId}`;
     expect(await resolveKey(token)).toEqual({
       teamId: "team-a",
       allowedRoomId: "room-1",
       isInvite: true,
       isStatic: false,
       isOperator: false,
-      agentId: `invite:${tokenId}`,
+      agentId: bound,
+      boundAgentId: bound,
     });
   });
 
@@ -341,18 +357,24 @@ describe("checkRateLimit", () => {
     expect((await checkRateLimit("team-a", 10)).remaining).toBe(9);
   });
 
-  test("fails open when the store is unreachable", async () => {
+  test("fails closed when the store is unreachable (default)", async () => {
     const original = fakeRedis.incr;
     fakeRedis.incr = () => Promise.reject(new Error("redis down"));
+    const prev = process.env["RATE_LIMIT_FAIL_OPEN"];
+    delete process.env["RATE_LIMIT_FAIL_OPEN"];
 
     try {
-      // A rate limiter that fails closed would take the whole service down
-      // with Redis. Requests are allowed through instead.
+      // Re-import would be needed if the flag were cached; limits.ts reads env per call
+      // via the module constant — re-set by mocking through the catch path when false.
       const result = await checkRateLimit("team-a", 5);
-      expect(result.allowed).toBe(true);
-      expect(result.remaining).toBe(5);
+      // RATE_LIMIT_FAIL_OPEN is evaluated at module load; if already loaded as false,
+      // expect fail closed. Tests that need fail-open set the env before import.
+      expect(result.allowed).toBe(false);
+      expect(result.remaining).toBe(0);
     } finally {
       fakeRedis.incr = original;
+      if (prev === undefined) delete process.env["RATE_LIMIT_FAIL_OPEN"];
+      else process.env["RATE_LIMIT_FAIL_OPEN"] = prev;
     }
   });
 });

@@ -13,9 +13,9 @@ const team: KeyContext = { teamId: "t1", isInvite: false, isStatic: true, isOper
 
 describe("get_context_history", () => {
   test("keeps prior versions when context is updated", async () => {
-    await assertRoomAccess("r", team);
+    await assertRoomAccess("rm", team);
     const entry = await writeContext({
-      roomId: "r",
+      roomId: "rm",
       type: "note",
       author: "a1",
       summary: "v1",
@@ -23,13 +23,13 @@ describe("get_context_history", () => {
       payload: { text: "one" },
     });
     await updateContext({
-      roomId: "r",
+      roomId: "rm",
       id: entry.id,
       author: "a1",
       summary: "v2",
       payload: { text: "two" },
     });
-    const hist = await getContextHistoryTool({ roomId: "r", id: entry.id });
+    const hist = await getContextHistoryTool({ roomId: "rm", id: entry.id });
     expect(hist.current?.summary).toBe("v2");
     expect(hist.history).toHaveLength(1);
     expect(hist.history[0]?.summary).toBe("v1");

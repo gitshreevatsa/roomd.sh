@@ -16,9 +16,9 @@ const team: KeyContext = { teamId: "t1", isInvite: false, isStatic: true, isOper
 
 describe("diff_context", () => {
   test("diffs current against previous history", async () => {
-    await assertRoomAccess("r", team);
+    await assertRoomAccess("rm", team);
     const entry = await writeContext({
-      roomId: "r",
+      roomId: "rm",
       type: "note",
       author: "a1",
       summary: "old",
@@ -26,13 +26,13 @@ describe("diff_context", () => {
       payload: { text: "a" },
     });
     await updateContext({
-      roomId: "r",
+      roomId: "rm",
       id: entry.id,
       author: "a1",
       summary: "new",
       payload: { text: "b" },
     });
-    const result = await diffContext({ roomId: "r", id: entry.id });
+    const result = await diffContext({ roomId: "rm", id: entry.id });
     expect(result.diff.summaryChanged).toBe(true);
     expect(result.diff.payload.changed).toContain("text");
   });
@@ -40,10 +40,10 @@ describe("diff_context", () => {
 
 describe("get_room_analytics", () => {
   test("reports completion rate", async () => {
-    await assertRoomAccess("r", team);
-    const t = await addTask({ roomId: "r", title: "A", description: "d" });
-    await updateTask({ roomId: "r", taskId: t.id, status: "done" });
-    const a = await getRoomAnalytics({ roomId: "r" });
+    await assertRoomAccess("rm", team);
+    const t = await addTask({ roomId: "rm", title: "A", description: "d" });
+    await updateTask({ roomId: "rm", taskId: t.id, status: "done" });
+    const a = await getRoomAnalytics({ roomId: "rm" });
     expect(a.tasks.total).toBe(1);
     expect(a.tasks.done).toBe(1);
     expect(a.tasks.completionRate).toBe(1);

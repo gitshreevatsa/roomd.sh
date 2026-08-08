@@ -80,4 +80,9 @@ export interface KeyContext {
    * from / author so clients cannot spoof another agent.
    */
   agentId?: string;
+  /**
+   * Credential-bound agent id (invite token or dyn key metadata).
+   * When set, MCP overwrites agentId/from/author; approve/reject require it.
+   */
+  boundAgentId?: string;
 }

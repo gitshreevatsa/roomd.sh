@@ -14,14 +14,14 @@ const team: KeyContext = { teamId: "t1", isInvite: false, isStatic: true, isOper
 
 describe("search", () => {
   test("finds tasks and context by substring", async () => {
-    await assertRoomAccess("r", team);
+    await assertRoomAccess("rm", team);
     await addTask({
-      roomId: "r",
+      roomId: "rm",
       title: "Wire auth middleware",
       description: "JWT validation",
     });
     await writeContext({
-      roomId: "r",
+      roomId: "rm",
       type: "note",
       author: "a1",
       summary: "Auth notes for middleware",
@@ -29,17 +29,17 @@ describe("search", () => {
       payload: { text: "use HS256" },
     });
 
-    const { hits } = await search({ roomId: "r", q: "auth" });
+    const { hits } = await search({ roomId: "rm", q: "auth" });
     expect(hits.some((h) => h.kind === "task")).toBe(true);
     expect(hits.some((h) => h.kind === "context")).toBe(true);
   });
 
   test("semantic mode errors when vector is not configured", async () => {
-    await assertRoomAccess("r", team);
+    await assertRoomAccess("rm", team);
     delete process.env["UPSTASH_VECTOR_REST_URL"];
     delete process.env["UPSTASH_VECTOR_REST_TOKEN"];
     await expect(
-      search({ roomId: "r", q: "auth", semantic: true }),
+      search({ roomId: "rm", q: "auth", semantic: true }),
     ).rejects.toThrow(/not configured/);
   });
 });

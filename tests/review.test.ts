@@ -12,9 +12,9 @@ const team: KeyContext = { teamId: "t1", isInvite: false, isStatic: true, isOper
 
 describe("review flow", () => {
   test("request then approve", async () => {
-    await assertRoomAccess("r", team);
+    await assertRoomAccess("rm", team);
     const review = await requestReview({
-      roomId: "r",
+      roomId: "rm",
       targetType: "task",
       targetId: "task-1",
       requestedBy: "alice",
@@ -24,48 +24,48 @@ describe("review flow", () => {
     expect(review.status).toBe("pending");
 
     const approved = await approve({
-      roomId: "r",
+      roomId: "rm",
       reviewId: review.id,
       agentId: "bob",
     });
     expect(approved.status).toBe("approved");
 
-    const events = await getEvents("r", 20);
+    const events = await getEvents("rm", 20);
     expect(events.some((e) => e.type === "review_requested")).toBe(true);
     expect(events.some((e) => e.type === "review_approved")).toBe(true);
   });
 
   test("wrong reviewer cannot approve", async () => {
-    await assertRoomAccess("r", team);
+    await assertRoomAccess("rm", team);
     const review = await requestReview({
-      roomId: "r",
+      roomId: "rm",
       targetType: "context",
       targetId: "c1",
       requestedBy: "alice",
       reviewer: "bob",
     });
     await expect(
-      approve({ roomId: "r", reviewId: review.id, agentId: "carol" }),
+      approve({ roomId: "rm", reviewId: review.id, agentId: "carol" }),
     ).rejects.toThrow(/Only reviewer/);
   });
 
   test("reject ends the review", async () => {
-    await assertRoomAccess("r", team);
+    await assertRoomAccess("rm", team);
     const review = await requestReview({
-      roomId: "r",
+      roomId: "rm",
       targetType: "task",
       targetId: "t1",
       requestedBy: "alice",
       reviewer: "bob",
     });
     const rejected = await reject({
-      roomId: "r",
+      roomId: "rm",
       reviewId: review.id,
       agentId: "bob",
       note: "needs work",
     });
     expect(rejected.status).toBe("rejected");
-    const listed = await listReviewsTool({ roomId: "r", status: "rejected" });
+    const listed = await listReviewsTool({ roomId: "rm", status: "rejected" });
     expect(listed).toHaveLength(1);
   });
 });

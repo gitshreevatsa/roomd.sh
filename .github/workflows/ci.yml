@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install
+        run: bun install --frozen-lockfile
+      - name: Test
+        run: bun test
+        env:
+          UPSTASH_REDIS_REST_URL: http://localhost
+          UPSTASH_REDIS_REST_TOKEN: test
+          OPERATOR_KEYS: operator:test-master

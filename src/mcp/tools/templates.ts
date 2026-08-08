@@ -1,12 +1,20 @@
 import { z } from "zod";
-import { nanoid } from "nanoid";
-import { assertRoomAccess, setPlan, pushEvent } from "../../store/redis.js";
+import { customAlphabet, nanoid } from "nanoid";
+import {
+  assertRoomAccess,
+  assertValidRoomId,
+  setPlan,
+  pushEvent,
+} from "../../store/redis.js";
 import type { KeyContext } from "../../types.js";
 import {
   ROOM_TEMPLATES,
   getTemplate,
   planFromTemplate,
 } from "../../templates.js";
+import { ROOM_ID_ALPHABET } from "../../limits.js";
+
+const genRoomId = customAlphabet(ROOM_ID_ALPHABET, 12);
 
 export const listTemplatesInput = z.object({});
 
@@ -43,7 +51,8 @@ export async function createRoomFromTemplate(
   const template = getTemplate(input.templateId);
   if (!template) throw new Error(`Unknown template: ${input.templateId}`);
 
-  const roomId = input.roomId?.trim() || nanoid(12);
+  const roomId = input.roomId?.trim() || genRoomId();
+  if (input.roomId?.trim()) assertValidRoomId(roomId);
   await assertRoomAccess(roomId, keyCtx);
 
   const plan = planFromTemplate(template, roomId);

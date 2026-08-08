@@ -171,6 +171,19 @@ export class FakeRedis {
     return "OK";
   }
 
+  async llen(key: string): Promise<number> {
+    const entry = this.live(key);
+    return Array.isArray(entry?.value) ? entry.value.length : 0;
+  }
+
+  async rename(oldKey: string, newKey: string): Promise<"OK"> {
+    const entry = this.live(oldKey);
+    if (!entry) throw new Error("ERR no such key");
+    this.store.delete(oldKey);
+    this.store.set(newKey, { value: entry.value, expiresAt: entry.expiresAt });
+    return "OK";
+  }
+
   // -- hash commands -------------------------------------------------------
 
   async hset(key: string, fields: Record<string, string>): Promise<number> {
