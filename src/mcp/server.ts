@@ -167,6 +167,7 @@ function registerRoomTool<Shape extends RoomShape>(
   description: string,
   schema: z.ZodObject<Shape>,
   handler: (input: z.infer<z.ZodObject<Shape>>) => Promise<unknown>,
+  requestId?: string,
 ): void {
   const callback = async (input: unknown): Promise<CallToolResult> => {
     const started = Date.now();
@@ -205,6 +206,7 @@ function registerRoomTool<Shape extends RoomShape>(
         roomId,
         ms: Date.now() - started,
         ok: true,
+        ...(requestId ? { requestId } : {}),
       });
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
@@ -218,6 +220,7 @@ function registerRoomTool<Shape extends RoomShape>(
         ms: Date.now() - started,
         ok: false,
         err: message,
+        ...(requestId ? { requestId } : {}),
       });
       return {
         content: [{ type: "text", text: `Error: ${message}` }],
@@ -247,8 +250,10 @@ function registerTeamTool<Shape extends z.ZodRawShape>(
     input: z.infer<z.ZodObject<Shape>>,
     keyCtx: KeyContext,
   ) => Promise<unknown>,
+  requestId?: string,
 ): void {
   const callback = async (input: unknown): Promise<CallToolResult> => {
+    const started = Date.now();
     try {
       const { allowed } = await checkRateLimit(
         rateLimitBucket(keyCtx),
@@ -262,11 +267,28 @@ function registerTeamTool<Shape extends z.ZodRawShape>(
         keyCtx,
       ) as z.infer<z.ZodObject<Shape>>;
       const result = await handler(parsed, keyCtx);
+      log.info({
+        msg: "mcp.tool",
+        tool: name,
+        teamId: keyCtx.teamId,
+        ms: Date.now() - started,
+        ok: true,
+        ...(requestId ? { requestId } : {}),
+      });
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      log.warn({
+        msg: "mcp.tool",
+        tool: name,
+        teamId: keyCtx.teamId,
+        ms: Date.now() - started,
+        ok: false,
+        err: message,
+        ...(requestId ? { requestId } : {}),
+      });
       return {
         content: [{ type: "text", text: `Error: ${message}` }],
         isError: true,
@@ -281,7 +303,7 @@ function registerTeamTool<Shape extends z.ZodRawShape>(
 }
 
 /** Creates and returns a configured McpServer with all roomd tools registered. */
-export function createMcpServer(keyCtx: KeyContext): McpServer {
+export function createMcpServer(keyCtx: KeyContext, requestId?: string): McpServer {
   const server = new McpServer({
     name: "roomd",
     version: "1.1.0",
@@ -292,7 +314,7 @@ export function createMcpServer(keyCtx: KeyContext): McpServer {
     description: string,
     schema: z.ZodObject<Shape>,
     handler: (input: z.infer<z.ZodObject<Shape>>) => Promise<unknown>,
-  ) => registerRoomTool(server, keyCtx, name, description, schema, handler);
+  ) => registerRoomTool(server, keyCtx, name, description, schema, handler, requestId);
 
   // -------------------------------------------------------------------------
   // Plan
@@ -456,6 +478,7 @@ export function createMcpServer(keyCtx: KeyContext): McpServer {
     "List built-in room templates (blank, web-app, incident, …).",
     listTemplatesInput,
     async (input) => listTemplates(input),
+    requestId,
   );
 
   registerTeamTool(
@@ -465,6 +488,7 @@ export function createMcpServer(keyCtx: KeyContext): McpServer {
     "Create (or claim) a room and seed its plan from a template. Omits roomId to auto-generate.",
     createRoomFromTemplateInput,
     createRoomFromTemplate,
+    requestId,
   );
 
   // -------------------------------------------------------------------------
@@ -599,6 +623,7 @@ export function createMcpServer(keyCtx: KeyContext): McpServer {
     "List room ids owned by your team (or the single room an invite token may access).",
     listRoomsInput,
     listRooms,
+    requestId,
   );
 
   tool(

@@ -54,10 +54,39 @@ import {
 
 initSentry();
 
-type Variables = { keyCtx: KeyContext };
+type Variables = { keyCtx: KeyContext; requestId: string };
 const app = new Hono<{ Variables: Variables }>();
 
 const genRoomId = customAlphabet(ROOM_ID_ALPHABET, 12);
+
+// ---------------------------------------------------------------------------
+// Request ID + access log (skip noisy /health probes)
+// ---------------------------------------------------------------------------
+
+app.use("*", async (c, next) => {
+  const incoming = c.req.header("x-request-id")?.trim();
+  const requestId =
+    incoming && incoming.length > 0 && incoming.length <= 128 ? incoming : nanoid(16);
+  c.set("requestId", requestId);
+  c.header("X-Request-Id", requestId);
+
+  const started = Date.now();
+  await next();
+
+  const path = c.req.path;
+  if (path === "/health") return;
+
+  const keyCtx = c.get("keyCtx") as KeyContext | undefined;
+  log.info({
+    msg: "http",
+    requestId,
+    method: c.req.method,
+    path,
+    status: c.res.status,
+    ms: Date.now() - started,
+    ...(keyCtx ? { teamId: keyCtx.teamId, operator: keyCtx.isOperator === true } : {}),
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Auth config: startup validation
@@ -92,15 +121,26 @@ function releaseStreamSlot(teamId: string): void {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const requireAuth = async (c: any, next: () => Promise<void>) => {
+  const requestId = c.get("requestId") as string | undefined;
   const auth: string = c.req.header("Authorization") ?? "";
   if (!auth.startsWith("Bearer ")) {
-    log.warn({ msg: "auth.fail", reason: "missing_bearer", path: c.req.path });
+    log.warn({
+      msg: "auth.fail",
+      reason: "missing_bearer",
+      path: c.req.path,
+      requestId,
+    });
     return c.json({ error: "Unauthorized" }, 401);
   }
 
   const keyCtx = await resolveKey(auth.slice(7));
   if (!keyCtx) {
-    log.warn({ msg: "auth.fail", reason: "unknown_key", path: c.req.path });
+    log.warn({
+      msg: "auth.fail",
+      reason: "unknown_key",
+      path: c.req.path,
+      requestId,
+    });
     return c.json({ error: "Unauthorized" }, 401);
   }
 
@@ -112,7 +152,12 @@ const requireAuth = async (c: any, next: () => Promise<void>) => {
       RATE_LIMIT_PER_MINUTE,
     );
     if (!allowed) {
-      log.warn({ msg: "auth.rate_limit", teamId: keyCtx.teamId, path: c.req.path });
+      log.warn({
+        msg: "auth.rate_limit",
+        teamId: keyCtx.teamId,
+        path: c.req.path,
+        requestId,
+      });
       return c.json(
         { error: "Rate limit exceeded" },
         429,
@@ -166,7 +211,7 @@ app.all("/mcp", requireAuth, async (c) => {
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined, // stateless mode
   });
-  const server = createMcpServer(keyCtx);
+  const server = createMcpServer(keyCtx, c.get("requestId"));
   await server.connect(transport);
   return transport.handleRequest(c.req.raw);
 });
@@ -448,6 +493,13 @@ app.post("/admin/keys/provision", requireAuth, requireTeamKey, async (c) => {
       note: body.note,
       boundAgentId: body.boundAgentId,
     });
+    log.info({
+      msg: "admin.provision",
+      requestId: c.get("requestId"),
+      teamId: newTeamId,
+      keyId: result.keyId,
+      by: keyCtx.teamId,
+    });
     return c.json({
       keyId: result.keyId,
       secret: result.secret,
@@ -481,6 +533,12 @@ app.post("/admin/keys", requireAuth, requireTeamKey, async (c) => {
     const result = await storeDynamicKey(keyCtx.teamId, keyCtx.teamId, {
       note: body.note,
       boundAgentId: body.boundAgentId,
+    });
+    log.info({
+      msg: "admin.keys.create",
+      requestId: c.get("requestId"),
+      teamId: keyCtx.teamId,
+      keyId: result.keyId,
     });
     return c.json({
       keyId: result.keyId,
@@ -548,6 +606,13 @@ app.delete("/admin/keys/:keyId", requireAuth, requireTeamKey, async (c) => {
     // Static operator keys may revoke any org key; teams may only revoke their own.
     const ok = await revokeDynamicKey(keyId, keyCtx.teamId, keyCtx.isOperator);
     if (!ok) return c.json({ error: "Key not found or not owned by your team" }, 404);
+    log.info({
+      msg: "admin.keys.revoke",
+      requestId: c.get("requestId"),
+      teamId: keyCtx.teamId,
+      keyId,
+      operator: keyCtx.isOperator === true,
+    });
     return c.json({ ok: true, keyId });
   } catch (err) {
     log.error({ msg: "admin/keys", detail: `revoke error: ${String(err)}` });
@@ -659,6 +724,13 @@ app.post("/admin/rooms/:roomId/invite", requireAuth, requireTeamKey, async (c) =
     const expiresIn = typeof body.expiresIn === "number" ? body.expiresIn : undefined;
 
     const result = await storeInviteToken(roomId, keyCtx.teamId, expiresIn);
+    log.info({
+      msg: "admin.invite.create",
+      requestId: c.get("requestId"),
+      teamId: keyCtx.teamId,
+      roomId,
+      tokenId: result.tokenId,
+    });
     return c.json({
       tokenId: result.tokenId,
       token: result.token,
